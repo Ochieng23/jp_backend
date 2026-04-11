@@ -7,6 +7,7 @@ import { v4 as uuidv4 } from 'uuid';
 import routes from './routes/index.js';
 import errorHandler from './middleware/errorHandler.js';
 import logger from './utils/logger.js';
+import { apiLimiter } from './middleware/rateLimiter.js';
 
 const app = express();
 
@@ -30,11 +31,7 @@ app.use(
 );
 
 // ─── CORS ──────────────────────────────────────────────────────────────────────
-const ALLOWED_ORIGINS = (
-  process.env.FRONTEND_URLS ||
-  process.env.NEXT_PUBLIC_FRONTEND_URL ||
-  'http://localhost:3000'
-).split(',').map((o) => o.trim());
+const ALLOWED_ORIGINS = (process.env.FRONTEND_URL || 'http://localhost:3000').split(',').map((o) => o.trim());
 
 app.use(
   cors({
@@ -74,7 +71,7 @@ app.get('/api/health', (_req, res) => {
 });
 
 // ─── API routes ───────────────────────────────────────────────────────────────
-app.use('/api', routes);
+app.use('/api', apiLimiter, routes);
 
 // ─── 404 handler ─────────────────────────────────────────────────────────────
 app.use((req, res) => {

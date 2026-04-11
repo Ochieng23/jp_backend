@@ -50,6 +50,9 @@ const workExperienceSchema = new Schema(
     description: {
       type: String,
     },
+    document_url: {
+      type: String, // base64 data URL or blob URL of supporting document (e.g. reference letter)
+    },
     deleted_at: {
       type: Date,
       default: null,
