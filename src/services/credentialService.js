@@ -4,6 +4,7 @@ import * as holderRepository from '../repositories/holderRepository.js';
 import * as organizationRepository from '../repositories/organizationRepository.js';
 import * as auditRepository from '../repositories/auditRepository.js';
 import { buildVCDocument, issueVC, verifyVC } from '../utils/vcUtils.js';
+import { jurisdictionSyncQueue } from '../config/queue.js';
 import logger from '../utils/logger.js';
 
 /**
@@ -190,6 +191,14 @@ export async function issueCredential(orgId, holderId, data) {
     metadata: { holder_id: holderId, type: data.type, title: data.title },
     jurisdiction_id: credential.jurisdiction_id,
   });
+
+  if (jurisdictionSyncQueue) {
+    await jurisdictionSyncQueue.add('evaluate-recognition', {
+      credentialId: credential.id || credentialId,
+      holderId,
+      jurisdictionId: credential.jurisdiction_id || null,
+    });
+  }
 
   logger.info(`Credential issued: ${credentialId} by org ${orgId} to holder ${holderId}`);
   return credential;
