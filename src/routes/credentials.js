@@ -72,7 +72,7 @@ router.get(
     // Access control: holders can only see their own credentials
     if (
       req.user.role === 'holder' &&
-      credential.holder_id !== req.user.id
+      String(credential.holder_id) !== String(req.user.id)
     ) {
       return res.status(403).json({
         error: 'FORBIDDEN',

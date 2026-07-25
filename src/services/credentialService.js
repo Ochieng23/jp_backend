@@ -249,7 +249,7 @@ export async function revokeCredential(credentialId, actorId, actorRole) {
   }
 
   // Authorisation check
-  const isIssuer = actorRole === 'org_admin' && credential.issuer_id === actorId;
+  const isIssuer = actorRole === 'org_admin' && String(credential.issuer_id) === String(actorId);
   const isPlatformAdmin = actorRole === 'platform_admin';
 
   if (!isIssuer && !isPlatformAdmin) {
@@ -325,16 +325,15 @@ export async function verifyCredential(credentialId) {
       ? JSON.parse(credentialWithIssuer.vc_json)
       : credentialWithIssuer.vc_json;
 
-  const publicKeyJwk =
-    typeof credentialWithIssuer.issuer.public_key_jwk === 'string'
-      ? JSON.parse(credentialWithIssuer.issuer.public_key_jwk)
-      : credentialWithIssuer.issuer.public_key_jwk;
-
   let cryptoResult = { verified: true, checks: ['proof'] };
 
   // Only run crypto verification if the credential has a real proof
   if (vcDocument.proof && credentialWithIssuer.proof_value !== 'self-reported') {
     try {
+      const publicKeyJwk =
+        typeof credentialWithIssuer.issuer?.public_key_jwk === 'string'
+          ? JSON.parse(credentialWithIssuer.issuer.public_key_jwk)
+          : credentialWithIssuer.issuer?.public_key_jwk;
       cryptoResult = await verifyVC(vcDocument, publicKeyJwk);
     } catch (err) {
       logger.warn(`Crypto verification error for credential ${credentialId}: ${err.message}`);

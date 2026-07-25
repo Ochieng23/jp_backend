@@ -56,15 +56,34 @@ export async function updateCredentialStatus(id, status) {
 }
 
 /**
- * Get a credential populated with its issuer organisation.
+ * Get a credential populated with its issuer organisation (and the issuer's
+ * own jurisdiction). Returned as `issuer`/`jurisdiction` (not `issuer_id`/
+ * `jurisdiction_id`) to match what verifyCredential() and the credential
+ * detail page expect.
  * @param {string} id
  * @returns {Promise<object|null>}
  */
 export async function getCredentialWithIssuer(id) {
-  return Credential.findById(id)
-    .populate('issuer_id', 'name did type verified jurisdiction_id public_key_jwk')
+  const doc = await Credential.findById(id)
+    .populate({
+      path: 'issuer_id',
+      select: 'name did type verified jurisdiction_id public_key_jwk',
+      populate: { path: 'jurisdiction_id', select: 'country_code country_name' },
+    })
     .populate('jurisdiction_id', 'country_code country_name')
     .lean();
+
+  if (!doc) return null;
+
+  const { issuer_id, jurisdiction_id, ...rest } = doc;
+  const issuer = issuer_id
+    ? (() => {
+        const { jurisdiction_id: issuerJurisdiction, ...issuerRest } = issuer_id;
+        return { ...issuerRest, jurisdiction: issuerJurisdiction || null };
+      })()
+    : null;
+
+  return { ...rest, issuer, jurisdiction: jurisdiction_id || null };
 }
 
 /**
