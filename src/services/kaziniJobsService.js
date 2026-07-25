@@ -71,6 +71,7 @@ export async function listJobs({
   location,
   jobType,
   experienceLevel,
+  contractType,
   skill,
   search,
 } = {}) {
@@ -86,6 +87,9 @@ export async function listJobs({
   }
   if (experienceLevel) {
     filtered = filtered.filter((j) => j.experienceLevel === experienceLevel);
+  }
+  if (contractType) {
+    filtered = filtered.filter((j) => j.contract_type === contractType);
   }
   if (skill) {
     const q = skill.toLowerCase();

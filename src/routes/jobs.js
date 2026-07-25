@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import Joi from 'joi';
 import { validate } from '../middleware/validate.js';
-import { authenticate } from '../middleware/auth.js';
+import { authenticate, optionalAuth } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import * as kaziniJobsService from '../services/kaziniJobsService.js';
 import * as holderRepository from '../repositories/holderRepository.js';
@@ -10,6 +10,12 @@ import JobApplication from '../models/JobApplication.js';
 const router = Router();
 
 const applySchema = Joi.object({
+  // Only required for guest (unauthenticated) applicants — a signed-in
+  // holder's name/email/phone come from their profile instead.
+  first_name: Joi.string().max(120),
+  last_name: Joi.string().max(120),
+  email: Joi.string().email({ tlds: false }),
+  phone: Joi.string().max(30),
   resume_url: Joi.string().uri().required(),
   cover_letter: Joi.string().max(500).allow('', null),
   how_heard: Joi.string().valid('Website', 'Social Media', 'Friend', 'Job Board', 'Other').default('Job Board'),
@@ -42,7 +48,7 @@ const applySchema = Joi.object({
  */
 router.get(
   '/',
-  authenticate,
+  optionalAuth,
   asyncHandler(async (req, res) => {
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const pageSize = Math.min(Math.max(1, parseInt(req.query.pageSize, 10) || 20), 100);
@@ -53,6 +59,7 @@ router.get(
       location: req.query.location,
       jobType: req.query.jobType,
       experienceLevel: req.query.experienceLevel,
+      contractType: req.query.contractType,
       skill: req.query.skill,
       search: req.query.search,
     });
@@ -82,7 +89,7 @@ router.get(
  */
 router.get(
   '/:id',
-  authenticate,
+  optionalAuth,
   asyncHandler(async (req, res) => {
     const job = await kaziniJobsService.getJob(req.params.id);
     res.json({ data: job });
@@ -91,20 +98,18 @@ router.get(
 
 /**
  * POST /api/jobs/:id/apply
- * Builds a kazini_backend Application payload from the holder's existing
- * passport profile and submits it server-to-server, then records a local
- * JobApplication so the holder can see it under "my applications".
+ * Works both as a guest (no account — first/last name, email, phone taken
+ * directly from the request body) and as a signed-in holder (name/email/phone
+ * taken from their passport profile, and the application is additionally
+ * recorded locally so it shows up under "my applications"). Either way the
+ * submission to kazini_backend itself is identical.
  */
 router.post(
   '/:id/apply',
-  authenticate,
+  optionalAuth,
   validate(applySchema),
   asyncHandler(async (req, res) => {
     const job = await kaziniJobsService.getJob(req.params.id);
-    const holder = await holderRepository.findHolderById(req.user.id);
-    if (!holder) {
-      return res.status(404).json({ error: 'NOT_FOUND', message: 'Holder not found', requestId: req.id });
-    }
     if (!job.employer?.id) {
       return res.status(422).json({
         error: 'UNPROCESSABLE',
@@ -113,8 +118,33 @@ router.post(
       });
     }
 
-    const [firstName, ...rest] = (holder.full_name || '').trim().split(/\s+/);
-    const lastName = rest.join(' ') || firstName;
+    let firstName, lastName, email, phone, holderId;
+
+    if (req.user) {
+      const holder = await holderRepository.findHolderById(req.user.id);
+      if (!holder) {
+        return res.status(404).json({ error: 'NOT_FOUND', message: 'Holder not found', requestId: req.id });
+      }
+      const [fn, ...rest] = (holder.full_name || '').trim().split(/\s+/);
+      firstName = fn;
+      lastName = rest.join(' ') || fn;
+      email = holder.email;
+      phone = holder.phone;
+      holderId = req.user.id;
+    } else {
+      const missing = ['first_name', 'last_name', 'email', 'phone'].filter((f) => !req.body[f]);
+      if (missing.length) {
+        return res.status(400).json({
+          error: 'BAD_REQUEST',
+          message: `Missing required field(s): ${missing.join(', ')}`,
+          requestId: req.id,
+        });
+      }
+      firstName = req.body.first_name;
+      lastName = req.body.last_name;
+      email = req.body.email;
+      phone = req.body.phone;
+    }
 
     if (job.customQuestions.length !== req.body.custom_answers.length) {
       return res.status(400).json({
@@ -127,8 +157,8 @@ router.post(
     const payload = {
       firstName,
       lastName,
-      email: holder.email,
-      phone: holder.phone,
+      email,
+      phone,
       howHeard: req.body.how_heard,
       coverLetter: req.body.cover_letter || undefined,
       resume: req.body.resume_url,
@@ -158,8 +188,14 @@ router.post(
       throw err;
     }
 
+    // Guests have no holder to link a local record to — nothing further to
+    // track (kazini_backend itself now has the real application).
+    if (!holderId) {
+      return res.status(201).json({ data: { kazini_application_id: kaziniResult.applicationId } });
+    }
+
     const record = await JobApplication.findOneAndUpdate(
-      { holder_id: req.user.id, kazini_job_id: job.id },
+      { holder_id: holderId, kazini_job_id: job.id },
       {
         $set: {
           kazini_application_id: kaziniResult.applicationId,

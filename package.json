@@ -1,7 +1,7 @@
 {
-  "name": "job-passport-api",
+  "name": "cazini-jobs-api",
   "version": "1.0.0",
-  "description": "Job Passport platform – REST API",
+  "description": "Cazini job platform API",
   "type": "module",
   "main": "server.js",
   "scripts": {

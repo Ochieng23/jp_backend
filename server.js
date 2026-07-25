@@ -29,7 +29,7 @@ process.on('unhandledRejection', (reason) => {
   try {
     await connectDB();
     const server = app.listen(PORT, () => {
-      logger.info(`Job Passport API running in ${process.env.NODE_ENV || 'development'} mode on port ${PORT}`);
+      logger.info(`Cazini API running in ${process.env.NODE_ENV || 'development'} mode on port ${PORT}`);
     });
 
     // ─── Graceful shutdown ────────────────────────────────────────────────────

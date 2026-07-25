@@ -4,7 +4,7 @@ import logger from '../utils/logger.js';
 // If MINIO_ENDPOINT is not set, all file operations are no-ops that return null.
 
 const ENABLED = Boolean(process.env.MINIO_ENDPOINT);
-const BUCKET = process.env.MINIO_BUCKET || 'job-passport';
+const BUCKET = process.env.MINIO_BUCKET || 'cazini';
 
 let minioClient = null;
 

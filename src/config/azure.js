@@ -3,7 +3,7 @@ import logger from '../utils/logger.js';
 
 const ACCOUNT = process.env.AZURE_STORAGE_ACCOUNT_NAME;
 const ACCOUNT_KEY = process.env.AZURE_STORAGE_ACCOUNT_KEY;
-const CONTAINER = process.env.AZURE_STORAGE_CONTAINER_NAME || 'job-passport-docs';
+const CONTAINER = process.env.AZURE_STORAGE_CONTAINER_NAME || 'cazini-docs';
 
 let blobServiceClient = null;
 let containerClient = null;

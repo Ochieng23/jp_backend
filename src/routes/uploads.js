@@ -2,7 +2,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import { v4 as uuidv4 } from 'uuid';
 import { uploadBuffer, isAzureConfigured } from '../config/azure.js';
-import { authenticate } from '../middleware/auth.js';
+import { optionalAuth } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import logger from '../utils/logger.js';
 
@@ -30,7 +30,7 @@ const upload = multer({
 // POST /api/uploads
 router.post(
   '/',
-  authenticate,
+  optionalAuth,
   upload.single('file'),
   asyncHandler(async (req, res) => {
     if (!isAzureConfigured()) {
@@ -45,11 +45,11 @@ router.post(
     }
 
     const ext = ALLOWED_TYPES[req.file.mimetype];
-    const blobName = `credentials/${req.user.id}/${uuidv4()}.${ext}`;
+    const blobName = `credentials/${req.user?.id || 'guest'}/${uuidv4()}.${ext}`;
 
     const url = await uploadBuffer(blobName, req.file.buffer, req.file.mimetype);
 
-    logger.info(`File uploaded: ${blobName} by holder ${req.user.id}`);
+    logger.info(`File uploaded: ${blobName}${req.user ? ` by holder ${req.user.id}` : ' (guest)'}`);
 
     res.status(201).json({
       url,
