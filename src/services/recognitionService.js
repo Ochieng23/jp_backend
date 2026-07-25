@@ -82,7 +82,7 @@ export async function evaluateRecognition(credentialId, targetJurisdictionId) {
     actor_type: 'admin',
     action: 'recognition.evaluated',
     resource_type: 'credential_recognition',
-    resource_id: recognitionRow.id,
+    resource_id: recognitionRow.id || recognitionRow._id,
     metadata: {
       credential_id: credentialId,
       jurisdiction_id: targetJurisdictionId,

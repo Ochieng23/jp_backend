@@ -9,6 +9,7 @@ import recognitionRoutes from './recognition.js';
 import auditRoutes from './audit.js';
 import adminRoutes from './admin.js';
 import uploadsRoutes from './uploads.js';
+import jobsRoutes from './jobs.js';
 
 const router = Router();
 
@@ -22,5 +23,6 @@ router.use('/recognition', recognitionRoutes);
 router.use('/audit', auditRoutes);
 router.use('/admin', adminRoutes);
 router.use('/uploads', uploadsRoutes);
+router.use('/jobs', jobsRoutes);
 
 export default router;

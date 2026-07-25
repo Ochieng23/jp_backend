@@ -40,14 +40,14 @@ jest.unstable_mockModule('../utils/vcUtils.js', () => ({
   verifyVC: mockVerifyVC,
 }));
 
-const mockQueueAdd = jest.fn();
-jest.unstable_mockModule('../config/queue.js', () => ({
-  jurisdictionSyncQueue: {
-    add: mockQueueAdd,
-  },
-  notificationQueue: {
-    add: jest.fn(),
-  },
+const mockFindByHolder = jest.fn();
+jest.unstable_mockModule('../repositories/recognitionRepository.js', () => ({
+  findByHolder: mockFindByHolder,
+}));
+
+const mockEvaluateRecognition = jest.fn();
+jest.unstable_mockModule('../services/recognitionService.js', () => ({
+  evaluateRecognition: mockEvaluateRecognition,
 }));
 
 // ─── Import service after all mocks are in place ──────────────────────────────
@@ -148,7 +148,7 @@ describe('credentialService', () => {
   // ── issueCredential ─────────────────────────────────────────────────────────
 
   describe('issueCredential', () => {
-    it('calls vcUtils.issueVC and enqueues a sync job', async () => {
+    it('calls vcUtils.issueVC and evaluates recognition synchronously', async () => {
       const orgId = 'org-uuid-2';
       const holderId = 'holder-uuid-2';
 
@@ -176,7 +176,8 @@ describe('credentialService', () => {
         rows: [{ id: 'cred-2', jurisdiction_id: 'jur-1' }],
         total: 1,
       });
-      mockQueueAdd.mockResolvedValue({ id: 'job-1' });
+      mockFindByHolder.mockResolvedValue([]);
+      mockEvaluateRecognition.mockResolvedValue({ id: 'recognition-1' });
       mockLogAction.mockResolvedValue({});
 
       const data = {
@@ -188,10 +189,7 @@ describe('credentialService', () => {
       const result = await issueCredential(orgId, holderId, data);
 
       expect(mockIssueVC).toHaveBeenCalledTimes(1);
-      expect(mockQueueAdd).toHaveBeenCalledWith(
-        'evaluate-recognition',
-        expect.objectContaining({ credentialId: 'cred-2' })
-      );
+      expect(mockEvaluateRecognition).toHaveBeenCalledWith('cred-2', 'jur-1');
       expect(result.id).toBe('cred-2');
     });
 

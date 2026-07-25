@@ -20,6 +20,10 @@ if (ACCOUNT && ACCOUNT_KEY) {
   logger.warn('AZURE_STORAGE_ACCOUNT_NAME or AZURE_STORAGE_ACCOUNT_KEY not set — file uploads disabled');
 }
 
+export function isAzureConfigured() {
+  return Boolean(containerClient);
+}
+
 export async function ensureContainer() {
   if (!containerClient) return;
   try {

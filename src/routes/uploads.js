@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { v4 as uuidv4 } from 'uuid';
-import { uploadBuffer } from '../config/azure.js';
+import { uploadBuffer, isAzureConfigured } from '../config/azure.js';
 import { authenticate } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import logger from '../utils/logger.js';
@@ -33,7 +33,7 @@ router.post(
   authenticate,
   upload.single('file'),
   asyncHandler(async (req, res) => {
-    if (!process.env.AZURE_STORAGE_CONNECTION_STRING) {
+    if (!isAzureConfigured()) {
       return res.status(501).json({
         error: 'NOT_CONFIGURED',
         message: 'File uploads are not configured on this server',

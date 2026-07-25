@@ -3,8 +3,9 @@ import * as credentialRepository from '../repositories/credentialRepository.js';
 import * as holderRepository from '../repositories/holderRepository.js';
 import * as organizationRepository from '../repositories/organizationRepository.js';
 import * as auditRepository from '../repositories/auditRepository.js';
+import * as recognitionRepository from '../repositories/recognitionRepository.js';
+import * as recognitionService from './recognitionService.js';
 import { buildVCDocument, issueVC, verifyVC } from '../utils/vcUtils.js';
-import { jurisdictionSyncQueue } from '../config/queue.js';
 import logger from '../utils/logger.js';
 
 /**
@@ -192,12 +193,32 @@ export async function issueCredential(orgId, holderId, data) {
     jurisdiction_id: credential.jurisdiction_id,
   });
 
-  if (jurisdictionSyncQueue) {
-    await jurisdictionSyncQueue.add('evaluate-recognition', {
-      credentialId: credential.id || credentialId,
-      holderId,
-      jurisdictionId: credential.jurisdiction_id || null,
-    });
+  // Evaluate recognition synchronously (no background queue in this MVP) for every
+  // jurisdiction the holder already has credentials or recognitions in.
+  const { rows: holderCredentials } = await credentialRepository.findCredentialsByHolder(holderId, {
+    limit: 1000,
+    offset: 0,
+  });
+  const existingRecognitions = await recognitionRepository.findByHolder(holderId);
+
+  const jurisdictionIds = new Set();
+  for (const c of holderCredentials) {
+    const jid = c.jurisdiction_id?._id || c.jurisdiction_id;
+    if (jid) jurisdictionIds.add(String(jid));
+  }
+  for (const r of existingRecognitions) {
+    const jid = r.target_jurisdiction_id?._id || r.target_jurisdiction_id;
+    if (jid) jurisdictionIds.add(String(jid));
+  }
+
+  for (const jurisdictionId of jurisdictionIds) {
+    try {
+      await recognitionService.evaluateRecognition(credential.id || credentialId, jurisdictionId);
+    } catch (err) {
+      logger.warn(
+        `Auto-evaluation failed for credential ${credentialId} in jurisdiction ${jurisdictionId}: ${err.message}`
+      );
+    }
   }
 
   logger.info(`Credential issued: ${credentialId} by org ${orgId} to holder ${holderId}`);
