@@ -30,16 +30,46 @@ const applySchema = Joi.object({
       })
     )
     .default([]),
+  // One entry per non-résumé, non-URL-only requiredDocument the job asks
+  // for (uploaded via POST /uploads first). `name` must exactly match the
+  // requiredDocument's display name — the matching fieldName kazini_backend
+  // actually checks against is re-derived from it server-side (see
+  // toKaziniFieldName below), not sent by the client.
   documents: Joi.array()
     .items(
       Joi.object({
         name: Joi.string().required(),
-        fieldName: Joi.string().required(),
         url: Joi.string().uri().required(),
       })
     )
     .default([]),
 });
+
+/**
+ * Replicates kazini_backend's Application.controller.js `toFieldName()`
+ * exactly. kazini_backend matches submitted documents against a job's
+ * requiredDocuments by re-deriving this from the document's display name —
+ * NOT by trusting the requiredDocument's own stored `fieldName` — so this
+ * must mirror that derivation bug-for-bug or valid submissions get rejected.
+ */
+function toKaziniFieldName(name) {
+  return (name || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, '')
+    .replace(/\s+/g, '_');
+}
+
+// kazini_backend requires E.164-ish digits-only (with optional leading +).
+// Holders/guests commonly type spaces, dashes, or parens — strip everything
+// but the leading + and digits before submitting so a display-friendly
+// phone number doesn't fail validation at apply time.
+function toE164(phone) {
+  if (!phone) return phone;
+  const trimmed = phone.trim();
+  const plus = trimmed.startsWith('+') ? '+' : '';
+  return plus + trimmed.replace(/\D/g, '');
+}
+const PHONE_RE = /^\+?[1-9]\d{6,14}$/;
 
 /**
  * GET /api/jobs
@@ -146,6 +176,15 @@ router.post(
       phone = req.body.phone;
     }
 
+    const normalizedPhone = toE164(phone);
+    if (!PHONE_RE.test(normalizedPhone)) {
+      return res.status(400).json({
+        error: 'BAD_REQUEST',
+        message: 'Please provide a valid phone number, e.g. +254712345678',
+        requestId: req.id,
+      });
+    }
+
     if (job.customQuestions.length !== req.body.custom_answers.length) {
       return res.status(400).json({
         error: 'BAD_REQUEST',
@@ -154,18 +193,50 @@ router.post(
       });
     }
 
+    // requiredDocuments the 3 standard URL fields already cover.
+    const URL_ONLY_FIELDS = { portfoliolink: req.body.portfolio_link, workprofile: req.body.work_profile, worksamples: req.body.work_samples };
+    const RESUME_NAMES = new Set(['cv', 'resume', 'curriculumvitae']);
+
+    const submittedDocsByName = new Map(req.body.documents.map((d) => [d.name, d]));
+    for (const doc of job.requiredDocuments || []) {
+      if (!doc.mandatory) continue;
+      const key = toKaziniFieldName(doc.name).replace(/_/g, '');
+      if (RESUME_NAMES.has(key)) continue; // covered by resume_url
+      if (Object.prototype.hasOwnProperty.call(URL_ONLY_FIELDS, key)) {
+        if (!URL_ONLY_FIELDS[key]) {
+          return res.status(400).json({
+            error: 'BAD_REQUEST',
+            message: `This job requires a link for "${doc.name}"`,
+            requestId: req.id,
+          });
+        }
+        continue;
+      }
+      if (!submittedDocsByName.has(doc.name)) {
+        return res.status(400).json({
+          error: 'BAD_REQUEST',
+          message: `This job requires a file upload for "${doc.name}"`,
+          requestId: req.id,
+        });
+      }
+    }
+
     const payload = {
       firstName,
       lastName,
       email,
-      phone,
+      phone: normalizedPhone,
       howHeard: req.body.how_heard,
       coverLetter: req.body.cover_letter || undefined,
       resume: req.body.resume_url,
       portfolioLink: req.body.portfolio_link || undefined,
       workProfile: req.body.work_profile || undefined,
       workSamples: req.body.work_samples || undefined,
-      documents: req.body.documents,
+      documents: req.body.documents.map((d) => ({
+        name: d.name,
+        fieldName: toKaziniFieldName(d.name),
+        url: d.url,
+      })),
       customAnswers: job.customQuestions.map((q, i) => ({
         question: q.question,
         answer: req.body.custom_answers[i]?.answer ?? '',

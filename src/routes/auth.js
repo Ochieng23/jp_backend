@@ -14,16 +14,17 @@ const router = Router();
 // ─── Validation schemas ───────────────────────────────────────────────────────
 
 const registerSchema = Joi.object({
+  // Minimal signup: name + email + password. Everything else is filled in
+  // later while building out the profile (PATCH /passport/me).
   full_name: Joi.string().min(2).max(120).required(),
-  date_of_birth: Joi.string()
-    .isoDate()
-    .required()
-    .messages({ 'string.isoDate': 'date_of_birth must be an ISO 8601 date string' }),
-  nationality: Joi.string().min(2).max(80).required(),
   email: Joi.string().email().lowercase().required(),
   password: Joi.string().min(8).max(128).required(),
+  date_of_birth: Joi.string()
+    .isoDate()
+    .optional()
+    .messages({ 'string.isoDate': 'date_of_birth must be an ISO 8601 date string' }),
+  nationality: Joi.string().min(2).max(80).optional(),
   phone: Joi.string().min(5).max(30).optional(),
-  unhcr_id: Joi.string().max(50).optional(),
 });
 
 const loginSchema = Joi.object({
@@ -69,7 +70,7 @@ router.post(
   authLimiter,
   validate(registerSchema),
   asyncHandler(async (req, res) => {
-    const { full_name, date_of_birth, nationality, email, password, phone, unhcr_id } = req.body;
+    const { full_name, date_of_birth, nationality, email, password, phone } = req.body;
 
     const existing = await holderRepository.findHolderByEmail(email);
     if (existing) {
@@ -89,7 +90,6 @@ router.post(
       email,
       password_hash,
       phone,
-      unhcr_id,
     });
 
     const holderId = String(holder.id || holder._id);

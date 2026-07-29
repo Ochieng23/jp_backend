@@ -90,19 +90,23 @@ export async function selfReportCredential(holderId, data) {
     document_key: data.document_key || null,
   });
 
-  // Audit log
+  // Audit log — resource_id must be the credential's real Mongo _id.
+  // `credentialId` (a UUID) was never actually persisted: the Credential
+  // schema has no `id` field, so Mongoose silently drops it in strict mode
+  // and assigns its own ObjectId `_id` instead. Passing the UUID here used
+  // to crash this whole request (AuditLog.resource_id is ObjectId-typed).
   await auditRepository.logAction({
     id: uuidv4(),
     actor_id: holderId,
     actor_type: 'holder',
     action: 'credential.self_reported',
     resource_type: 'credential',
-    resource_id: credentialId,
+    resource_id: credential._id,
     metadata: { type: data.type, title: data.title },
     jurisdiction_id: data.jurisdiction_id || null,
   });
 
-  logger.info(`Credential self-reported: ${credentialId} by holder ${holderId}`);
+  logger.info(`Credential self-reported: ${credential._id} by holder ${holderId}`);
   return credential;
 }
 
@@ -181,14 +185,15 @@ export async function issueCredential(orgId, holderId, data) {
     jurisdiction_id: data.jurisdiction_id || org.jurisdiction_id || null,
   });
 
-  // Audit log
+  // Audit log — resource_id must be the credential's real Mongo _id, not the
+  // unpersisted UUID (see the note in selfReportCredential above).
   await auditRepository.logAction({
     id: uuidv4(),
     actor_id: orgId,
     actor_type: 'organization',
     action: 'credential.issued',
     resource_type: 'credential',
-    resource_id: credentialId,
+    resource_id: credential._id,
     metadata: { holder_id: holderId, type: data.type, title: data.title },
     jurisdiction_id: credential.jurisdiction_id,
   });
@@ -213,15 +218,15 @@ export async function issueCredential(orgId, holderId, data) {
 
   for (const jurisdictionId of jurisdictionIds) {
     try {
-      await recognitionService.evaluateRecognition(credential.id || credentialId, jurisdictionId);
+      await recognitionService.evaluateRecognition(credential.id, jurisdictionId);
     } catch (err) {
       logger.warn(
-        `Auto-evaluation failed for credential ${credentialId} in jurisdiction ${jurisdictionId}: ${err.message}`
+        `Auto-evaluation failed for credential ${credential.id} in jurisdiction ${jurisdictionId}: ${err.message}`
       );
     }
   }
 
-  logger.info(`Credential issued: ${credentialId} by org ${orgId} to holder ${holderId}`);
+  logger.info(`Credential issued: ${credential.id} by org ${orgId} to holder ${holderId}`);
   return credential;
 }
 

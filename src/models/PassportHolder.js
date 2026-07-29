@@ -13,17 +13,24 @@ const passportHolderSchema = new Schema(
     },
     date_of_birth: {
       type: Date,
-      required: [true, 'Date of birth is required'],
+      // Optional at registration — collected later when the holder builds
+      // out their profile (see PATCH /passport/me).
     },
     nationality: {
       type: String,
-      required: [true, 'Nationality is required'],
       trim: true,
     },
+    // Not a product feature (the platform serves all jobseekers, not only
+    // refugees) — this field is never accepted from or returned to a
+    // client. It still exists purely because Cosmos DB for MongoDB refuses
+    // to drop/modify a unique index on a non-empty collection, and this
+    // legacy index can't honor `sparse`, so holderRepository silently writes
+    // a distinct `unset:<uuid>` sentinel here on every create to keep that
+    // index from colliding across holders. Do not reintroduce this as a
+    // visible field without also fixing the underlying index.
     unhcr_id: {
       type: String,
       trim: true,
-      // unique sparse index defined below via schema.index()
     },
     phone: {
       type: String,
@@ -43,6 +50,9 @@ const passportHolderSchema = new Schema(
     },
     avatar_key: {
       type: String, // MinIO / Azure object key or base64 data URI
+    },
+    intro_video_url: {
+      type: String, // Azure Blob URL of the holder's craft-explainer video (<=10MB)
     },
     bio: {
       type: String,
@@ -77,10 +87,10 @@ passportHolderSchema.methods.toPublic = function () {
     full_name: this.full_name,
     date_of_birth: this.date_of_birth,
     nationality: this.nationality,
-    unhcr_id: this.unhcr_id,
     phone: this.phone,
     email: this.email,
     avatar_key: this.avatar_key,
+    intro_video_url: this.intro_video_url,
     bio: this.bio,
     role: this.role,
     created_at: this.created_at,
@@ -88,8 +98,9 @@ passportHolderSchema.methods.toPublic = function () {
 };
 
 // ─── Indexes ──────────────────────────────────────────────────────────────
-// email unique + unhcr_id sparse-unique defined at field level above
 passportHolderSchema.index({ email: 1 }, { unique: true });
+// unhcr_id: legacy unique index, kept only because Cosmos won't let it be
+// dropped in place — see the field comment above.
 passportHolderSchema.index({ unhcr_id: 1 }, { unique: true, sparse: true });
 
 export default model('PassportHolder', passportHolderSchema);

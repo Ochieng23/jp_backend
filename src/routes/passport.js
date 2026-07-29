@@ -45,9 +45,9 @@ const updateMeSchema = Joi.object({
   phone: Joi.string().min(5).max(30).allow(null, ''),
   nationality: Joi.string().min(2).max(80),
   date_of_birth: Joi.string().isoDate(),
-  unhcr_id: Joi.string().max(50).allow(null, ''),
   bio: Joi.string().max(600).allow(null, ''),
   avatar_key: Joi.string().max(2_000_000).allow(null, ''), // URL or base64 data URI
+  intro_video_url: Joi.string().uri().max(2000).allow(null, ''),
 }).min(1);
 
 // ── Parse expires_in like "1h", "7d", "30d" into seconds ──────────────────────
