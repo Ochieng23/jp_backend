@@ -32,16 +32,23 @@ export async function selfReportCredential(holderId, data) {
     throw err;
   }
 
-  const org = await organizationRepository.findById(data.issuer_id);
-  if (!org) {
-    const err = new Error('Issuing organisation not found');
-    err.statusCode = 404;
-    throw err;
+  // Two ways to declare who issued this credential: a registered platform
+  // organisation (issuer_id — enables real DID-signed verification), or a
+  // plain free-text name (issuer_name — the common case for a holder listing
+  // a school, employer, or licensing body that isn't on the platform).
+  let org = null;
+  if (data.issuer_id) {
+    org = await organizationRepository.findById(data.issuer_id);
+    if (!org) {
+      const err = new Error('Issuing organisation not found');
+      err.statusCode = 404;
+      throw err;
+    }
   }
 
   const credentialId = uuidv4();
   const holderDid = `did:passport:holder:${holderId}`;
-  const issuerDid = org.did;
+  const issuerDid = org ? org.did : holderDid; // self-attested when no registered org
 
   const unsignedVC = buildVCDocument({
     issuerDid,
@@ -61,9 +68,10 @@ export async function selfReportCredential(holderId, data) {
   let signedVC = unsignedVC;
   let proofValue = 'self-reported';
 
-  // Attempt to sign with the org's key if available in env
-  const envKey = `ORG_PRIVATE_KEY_${data.issuer_id}`;
-  if (process.env[envKey]) {
+  // Attempt to sign with the org's key if available in env (only possible
+  // when a registered organisation issued this credential)
+  const envKey = org ? `ORG_PRIVATE_KEY_${data.issuer_id}` : null;
+  if (envKey && process.env[envKey]) {
     try {
       const verificationMethodId = `${issuerDid}#${issuerDid.split(':').pop()}`;
       signedVC = await issueVC(unsignedVC, data.issuer_id, verificationMethodId);
@@ -76,7 +84,8 @@ export async function selfReportCredential(holderId, data) {
   const credential = await credentialRepository.createCredential({
     id: credentialId,
     holder_id: holderId,
-    issuer_id: data.issuer_id,
+    issuer_id: data.issuer_id || null,
+    issuer_name: org ? null : (data.issuer_name || null),
     type: data.type,
     title: data.title,
     description: data.description || null,

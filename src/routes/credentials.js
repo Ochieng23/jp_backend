@@ -19,9 +19,12 @@ const createCredentialSchema = Joi.object({
   expires_at: Joi.string().isoDate().optional(),
   jurisdiction_id: Joi.string().optional().allow(null, ''),
   issuer_id: Joi.string().optional().allow(null, ''),
+  issuer_name: Joi.string().min(2).max(255).optional().allow(null, ''),
   document_url: Joi.string().uri().optional(),
   document_key: Joi.string().optional(),
-});
+})
+  .or('issuer_id', 'issuer_name')
+  .messages({ 'object.missing': 'Please provide who issued this credential' });
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
 

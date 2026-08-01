@@ -13,7 +13,12 @@ const credentialSchema = new Schema(
     issuer_id: {
       type: Schema.Types.ObjectId,
       ref: 'IssuingOrganization',
-      required: true,
+      // Optional — self-reported credentials without a registered issuing
+      // organisation on the platform use issuer_name (free text) instead.
+    },
+    issuer_name: {
+      type: String,
+      trim: true, // free-text issuer, used when issuer_id isn't set
     },
     type: {
       type: String,

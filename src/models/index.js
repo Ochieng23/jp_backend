@@ -6,5 +6,6 @@ export { default as Jurisdiction } from './Jurisdiction.js';
 export { default as IssuingOrganization } from './IssuingOrganization.js';
 export { default as Credential } from './Credential.js';
 export { default as WorkExperience } from './WorkExperience.js';
+export { default as Education } from './Education.js';
 export { default as CredentialRecognition } from './CredentialRecognition.js';
 export { default as AuditLog } from './AuditLog.js';
