@@ -52,7 +52,7 @@ const passportHolderSchema = new Schema(
       type: String, // MinIO / Azure object key or base64 data URI
     },
     intro_video_url: {
-      type: String, // Azure Blob URL of the holder's craft-explainer video (<=10MB)
+      type: String, // Azure Blob URL of the holder's craft-explainer video (<=50MB)
     },
     bio: {
       type: String,

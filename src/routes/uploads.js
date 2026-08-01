@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { uploadBuffer, isAzureConfigured } from '../config/azure.js';
 import { authenticate, optionalAuth } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
+import { moderateVideo } from '../services/videoModerationService.js';
 import logger from '../utils/logger.js';
 
 const router = Router();
@@ -27,9 +28,8 @@ const upload = multer({
   },
 });
 
-// Craft-explainer video attached to a holder's profile — capped at 10MB per
-// the product requirement (also keeps it well within Cosmos/Mongo document
-// and typical mobile-upload constraints; stored in Blob, never inline).
+// Craft-explainer video attached to a holder's profile — capped at 50MB
+// (stored in Blob, never inline).
 const ALLOWED_VIDEO_TYPES = {
   'video/mp4': 'mp4',
   'video/webm': 'webm',
@@ -38,7 +38,7 @@ const ALLOWED_VIDEO_TYPES = {
 
 const uploadVideo = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
   fileFilter(_req, file, cb) {
     if (ALLOWED_VIDEO_TYPES[file.mimetype]) {
       cb(null, true);
@@ -103,6 +103,19 @@ router.post(
     }
 
     const ext = ALLOWED_VIDEO_TYPES[req.file.mimetype];
+
+    // Guardrail: screen for explicit/graphic content (Azure AI Content
+    // Safety over sampled frames) before anything is stored.
+    const verdict = await moderateVideo(req.file.buffer, ext);
+    if (!verdict.allowed) {
+      logger.warn(`Video upload rejected by moderation for holder ${req.user.id}`);
+      return res.status(422).json({
+        error: 'CONTENT_REJECTED',
+        message: verdict.reason,
+        requestId: req.id,
+      });
+    }
+
     const blobName = `videos/${req.user.id}/${uuidv4()}.${ext}`;
 
     const url = await uploadBuffer(blobName, req.file.buffer, req.file.mimetype);
@@ -120,11 +133,12 @@ router.post(
 );
 
 // Handle multer errors (file too large, wrong type) as 400 instead of 500
-router.use((err, _req, res, next) => {
+router.use((err, req, res, next) => {
   if (err instanceof multer.MulterError) {
+    const limit = req.path === '/video' ? '50MB' : '10MB';
     return res.status(400).json({
       error: 'BAD_REQUEST',
-      message: err.code === 'LIMIT_FILE_SIZE' ? 'File exceeds the 10MB size limit' : err.message,
+      message: err.code === 'LIMIT_FILE_SIZE' ? `File exceeds the ${limit} size limit` : err.message,
     });
   }
   if (err && err.message && (err.message.startsWith('Only PDF') || err.message.startsWith('Only MP4'))) {
