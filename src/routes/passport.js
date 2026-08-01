@@ -93,6 +93,65 @@ router.patch(
 );
 
 /**
+ * GET /api/passport/me/avatar/download
+ * Streams the holder's profile photo as a file download. Handles both
+ * Azure blob URLs and base64 data-URI avatars (the no-storage fallback),
+ * so the browser never needs CORS access to the storage account.
+ */
+const AVATAR_EXT_BY_TYPE = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'image/gif': 'gif',
+};
+
+router.get(
+  '/me/avatar/download',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const holder = await holderRepository.findHolderById(req.user.id);
+    if (!holder?.avatar_key) {
+      return res.status(404).json({ error: 'NOT_FOUND', message: 'No profile photo set', requestId: req.id });
+    }
+
+    if (holder.avatar_key.startsWith('data:')) {
+      const match = holder.avatar_key.match(/^data:([^;]+);base64,(.+)$/);
+      if (!match) {
+        return res.status(422).json({ error: 'UNPROCESSABLE', message: 'Stored photo is not downloadable', requestId: req.id });
+      }
+      const [, contentType, b64] = match;
+      const ext = AVATAR_EXT_BY_TYPE[contentType] || 'img';
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Content-Disposition', `attachment; filename="profile-photo.${ext}"`);
+      return res.send(Buffer.from(b64, 'base64'));
+    }
+
+    // Remote URL — only proxy our own storage account, never arbitrary
+    // hosts (avatar_key is holder-settable, so an open proxy here would
+    // be an SSRF vector).
+    let parsed;
+    try {
+      parsed = new URL(holder.avatar_key);
+    } catch {
+      return res.status(422).json({ error: 'UNPROCESSABLE', message: 'Stored photo is not downloadable', requestId: req.id });
+    }
+    if (!parsed.hostname.endsWith('.blob.core.windows.net')) {
+      return res.status(422).json({ error: 'UNPROCESSABLE', message: 'Stored photo is not downloadable', requestId: req.id });
+    }
+
+    const upstream = await fetch(holder.avatar_key);
+    if (!upstream.ok) {
+      return res.status(502).json({ error: 'BAD_GATEWAY', message: 'Could not fetch the stored photo', requestId: req.id });
+    }
+    const contentType = upstream.headers.get('content-type') || 'application/octet-stream';
+    const ext = AVATAR_EXT_BY_TYPE[contentType] || 'img';
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="profile-photo.${ext}"`);
+    return res.send(Buffer.from(await upstream.arrayBuffer()));
+  })
+);
+
+/**
  * POST /api/passport/share-link
  * Generate a time-limited share token and persist it.
  */
