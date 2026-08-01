@@ -10,6 +10,7 @@ import * as auditRepository from '../repositories/auditRepository.js';
 import ShareLink from '../models/ShareLink.js';
 import Credential from '../models/Credential.js';
 import WorkExperience from '../models/WorkExperience.js';
+import Education from '../models/Education.js';
 
 // ── Short slug helper (8-char base62) ─────────────────────────────────────────
 const SLUG_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
@@ -35,7 +36,11 @@ async function buildPublicView(holderId) {
     .sort({ start_date: -1 })
     .lean();
 
-  return { holder: publicHolder, credentials, workExperiences };
+  const education = await Education.find({ holder_id: holder._id, deleted_at: null })
+    .sort({ start_date: -1 })
+    .lean();
+
+  return { holder: publicHolder, credentials, workExperiences, education };
 }
 
 const router = Router();
