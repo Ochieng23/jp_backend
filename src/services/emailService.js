@@ -43,6 +43,18 @@ export async function sendEmail(to, subject, html) {
   return { messageId: result.id };
 }
 
+// full_name is holder-controlled (set at registration) and gets interpolated
+// into email HTML below — escape it so a name like `<img src=x onerror=...>`
+// can't inject markup into an email a real client might render.
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function emailShell(bodyHtml) {
   return `
     <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px 24px;">
@@ -65,22 +77,22 @@ function ctaButton(url, label) {
 
 export function verificationEmail(fullName, verifyUrl) {
   return emailShell(`
-    <p style="font-size: 15px; color: #111928;">Hi ${fullName},</p>
+    <p style="font-size: 15px; color: #111928;">Hi ${escapeHtml(fullName)},</p>
     <p style="font-size: 15px; color: #111928; line-height: 1.5;">
       Thanks for creating your Job Passport. Please confirm your email address to finish setting up your account.
     </p>
-    ${ctaButton(verifyUrl, 'Verify email address')}
+    ${ctaButton(escapeHtml(verifyUrl), 'Verify email address')}
     <p style="font-size: 13px; color: #6b7280;">This link expires in 24 hours.</p>
   `);
 }
 
 export function passwordResetEmail(fullName, resetUrl) {
   return emailShell(`
-    <p style="font-size: 15px; color: #111928;">Hi ${fullName},</p>
+    <p style="font-size: 15px; color: #111928;">Hi ${escapeHtml(fullName)},</p>
     <p style="font-size: 15px; color: #111928; line-height: 1.5;">
       We received a request to reset your Job Passport password. Click below to choose a new one.
     </p>
-    ${ctaButton(resetUrl, 'Reset password')}
+    ${ctaButton(escapeHtml(resetUrl), 'Reset password')}
     <p style="font-size: 13px; color: #6b7280;">
       This link expires in 1 hour. If you didn't request a password reset, you can ignore this email — your password won't change.
     </p>
