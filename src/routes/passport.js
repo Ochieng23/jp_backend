@@ -45,14 +45,20 @@ async function buildPublicView(holderId) {
 
 const router = Router();
 
+// Accepts an https(s) blob URL or a data:image/*;base64, URI (the
+// no-Azure-storage fallback in Settings) — rejects any other scheme
+// (javascript:, data:text/html, etc.) that could be clicked/rendered on
+// the public share page.
+const AVATAR_KEY_PATTERN = /^(https?:\/\/|data:image\/(png|jpe?g|gif|webp);base64,)/i;
+
 const updateMeSchema = Joi.object({
   full_name: Joi.string().min(2).max(120),
   phone: Joi.string().min(5).max(30).allow(null, ''),
   nationality: Joi.string().min(2).max(80),
   date_of_birth: Joi.string().isoDate(),
   bio: Joi.string().max(600).allow(null, ''),
-  avatar_key: Joi.string().max(2_000_000).allow(null, ''), // URL or base64 data URI
-  intro_video_url: Joi.string().uri().max(2000).allow(null, ''),
+  avatar_key: Joi.string().max(2_000_000).pattern(AVATAR_KEY_PATTERN).allow(null, ''), // URL or base64 image data URI
+  intro_video_url: Joi.string().uri({ scheme: ['http', 'https'] }).max(2000).allow(null, ''),
 }).min(1);
 
 // ── Parse expires_in like "1h", "7d", "30d" into seconds ──────────────────────
