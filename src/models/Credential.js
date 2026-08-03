@@ -66,6 +66,19 @@ const credentialSchema = new Schema(
       ref: 'Jurisdiction',
       // index defined below via schema.index()
     },
+    // Distinct from the cryptographic proof check (GET /:id/verify): this is
+    // a simple human-reviewed flag a platform_admin sets via the admin
+    // verification queue, since most credentials (self-reported, or
+    // org-issued without a real signing key configured) will otherwise
+    // always fail crypto verification despite being legitimate.
+    verified: {
+      type: Boolean,
+      default: false,
+    },
+    verification_requested_at: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: { createdAt: 'created_at' },

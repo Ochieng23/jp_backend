@@ -89,6 +89,60 @@ export async function deleteCredential(id) {
 }
 
 /**
+ * Holder-triggered: flag a credential as awaiting admin review. Does not
+ * verify it — only surfaces it (sorted first) in the admin pending queue.
+ * @param {string} id
+ * @returns {Promise<object|null>}
+ */
+export async function requestVerification(id) {
+  return Credential.findByIdAndUpdate(
+    id,
+    { verification_requested_at: new Date() },
+    { new: true }
+  ).lean();
+}
+
+/**
+ * Mark a credential as verified. Admin-only action (enforced by the route).
+ * @param {string} id
+ * @returns {Promise<object|null>}
+ */
+export async function markVerified(id) {
+  return Credential.findByIdAndUpdate(id, { verified: true }, { new: true }).lean();
+}
+
+/**
+ * Find all not-yet-verified credentials across every holder, for admin
+ * review. Credentials with a pending holder request are surfaced first.
+ *
+ * Sorts by created_at only in the DB query — Cosmos DB for MongoDB needs a
+ * composite index for a compound sort key, which this collection doesn't
+ * have — then reorders requested-first in application code instead.
+ * @param {object} [filters] - { limit?, offset? }
+ * @returns {Promise<{ rows: object[], total: number }>}
+ */
+export async function findAllPending(filters = {}) {
+  // $ne (not $eq false) so credentials that predate the `verified` field
+  // (and so have it entirely absent, not stored as false) are still
+  // treated as pending rather than silently excluded from the queue.
+  const q = { verified: { $ne: true } };
+  const total = await Credential.countDocuments(q);
+  const limit = filters.limit || 20;
+  const skip = filters.offset || 0;
+
+  const rows = await Credential.find(q)
+    .sort({ created_at: -1 })
+    .skip(skip)
+    .limit(limit)
+    .populate('holder_id', 'full_name email')
+    .lean();
+
+  rows.sort((a, b) => Boolean(b.verification_requested_at) - Boolean(a.verification_requested_at));
+
+  return { rows, total };
+}
+
+/**
  * Get a credential populated with its issuer organisation (and the issuer's
  * own jurisdiction). Returned as `issuer`/`jurisdiction` (not `issuer_id`/
  * `jurisdiction_id`) to match what verifyCredential() and the credential

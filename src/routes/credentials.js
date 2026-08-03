@@ -184,6 +184,31 @@ router.delete(
 );
 
 /**
+ * POST /api/credentials/:id/request-verification
+ * Holder-triggered: flag this credential for admin review. Does not verify
+ * it immediately — a platform_admin still has to confirm it via the admin
+ * verification queue.
+ */
+router.post(
+  '/:id/request-verification',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const credential = await credentialRepository.findCredentialById(req.params.id);
+    if (!credential) {
+      return res.status(404).json({ error: 'NOT_FOUND', message: 'Credential not found', requestId: req.id });
+    }
+    if (String(credential.holder_id) !== String(req.user.id)) {
+      return res.status(403).json({ error: 'FORBIDDEN', message: 'Not your credential', requestId: req.id });
+    }
+    if (credential.verified) {
+      return res.status(422).json({ error: 'VALIDATION_ERROR', message: 'This credential is already verified', requestId: req.id });
+    }
+    const updated = await credentialRepository.requestVerification(req.params.id);
+    res.json({ data: updated });
+  })
+);
+
+/**
  * PATCH /api/credentials/:id/revoke
  * Revoke a credential. Only issuer (org_admin) or platform_admin.
  */

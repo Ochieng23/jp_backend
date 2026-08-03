@@ -35,3 +35,38 @@ export async function softDelete(id) {
     { new: true }
   ).lean();
 }
+
+/**
+ * Mark an entry as verified. Admin-only action (enforced by the route).
+ * @param {string} id
+ * @returns {Promise<object|null>}
+ */
+export async function verifyEntry(id) {
+  return WorkExperience.findOneAndUpdate(
+    { _id: id, deleted_at: null },
+    { verified: true },
+    { new: true }
+  ).lean();
+}
+
+/**
+ * Find all not-yet-verified entries across every holder, for admin review.
+ * @param {object} [filters] - { limit?, offset? }
+ * @returns {Promise<{ rows: object[], total: number }>}
+ */
+export async function findAllPending(filters = {}) {
+  const q = { verified: false, deleted_at: null };
+  const total = await WorkExperience.countDocuments(q);
+  const limit = filters.limit || 20;
+  const skip = filters.offset || 0;
+
+  const rows = await WorkExperience.find(q)
+    .sort({ created_at: -1 })
+    .skip(skip)
+    .limit(limit)
+    .populate('holder_id', 'full_name email')
+    .populate('jurisdiction_id', 'country_code country_name')
+    .lean();
+
+  return { rows, total };
+}
