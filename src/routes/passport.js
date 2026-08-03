@@ -52,11 +52,24 @@ const router = Router();
 // the public share page.
 const AVATAR_KEY_PATTERN = /^(https?:\/\/|data:image\/(png|jpe?g|gif|webp);base64,)/i;
 
+// Mirrors the exact 13-year check already enforced client-side in
+// Settings' validate() — without this, a direct PATCH call could set any
+// date_of_birth (including one implying a negative or infant age) since
+// Joi's isoDate() only checks the string is a valid date, not a plausible one.
+const MIN_AGE_YEARS = 13;
+function validateMinimumAge(value, helpers) {
+  const ageYears = (Date.now() - new Date(value).getTime()) / (1000 * 60 * 60 * 24 * 365);
+  if (ageYears < MIN_AGE_YEARS) return helpers.error('date.tooYoung');
+  return value;
+}
+
 const updateMeSchema = Joi.object({
   full_name: Joi.string().min(2).max(120),
   phone: Joi.string().min(5).max(30).allow(null, ''),
   nationality: Joi.string().min(2).max(80),
-  date_of_birth: Joi.string().isoDate(),
+  date_of_birth: Joi.string().isoDate().custom(validateMinimumAge).messages({
+    'date.tooYoung': `You must be at least ${MIN_AGE_YEARS} years old`,
+  }),
   bio: Joi.string().max(600).allow(null, ''),
   avatar_key: Joi.string().max(2_000_000).pattern(AVATAR_KEY_PATTERN).allow(null, ''), // URL or base64 image data URI
   intro_video_url: Joi.string().uri({ scheme: ['http', 'https'] }).max(2000).allow(null, ''),
@@ -113,7 +126,13 @@ router.patch(
     if (!updated) {
       return res.status(404).json({ error: 'NOT_FOUND', message: 'Holder not found', requestId: req.id });
     }
-    res.json({ data: updated });
+    // Return the fully computed profile (credential_summary, profile_completion,
+    // etc.), not just the raw updated fields — the frontend applies this
+    // response as an optimistic local cache update without revalidating, so
+    // returning less than GET /me would silently drop those computed fields
+    // from the client's cached user object until the next full refetch.
+    const holder = await holderRepository.getHolderWithCredentialSummary(req.user.id);
+    res.json({ data: holder });
   })
 );
 
