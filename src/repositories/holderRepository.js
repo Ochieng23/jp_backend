@@ -63,12 +63,12 @@ export async function findHolderById(id) {
  * Update allowed profile fields. Does NOT allow changing email or password
  * (or unhcr_id, which isn't a client-settable field at all).
  * @param {string} id
- * @param {object} data - { full_name?, phone?, nationality?, date_of_birth?, avatar_key?, intro_video_url?, bio? }
+ * @param {object} data - { full_name?, phone?, nationality?, date_of_birth?, avatar_key?, intro_video_url?, bio?, industries?, open_to_any_industry? }
  * @returns {Promise<object|null>} Updated holder
  */
 export async function updateHolder(id, data) {
   const allowed = {};
-  for (const f of ['full_name', 'phone', 'nationality', 'date_of_birth', 'avatar_key', 'intro_video_url', 'bio']) {
+  for (const f of ['full_name', 'phone', 'nationality', 'date_of_birth', 'avatar_key', 'intro_video_url', 'bio', 'industries', 'open_to_any_industry']) {
     if (data[f] !== undefined) allowed[f] = data[f];
   }
   return omitUnhcrId(

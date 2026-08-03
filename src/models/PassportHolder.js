@@ -59,6 +59,14 @@ const passportHolderSchema = new Schema(
       trim: true,
       maxlength: [600, 'Bio must be at most 600 characters'],
     },
+    industries: {
+      type: [String],
+      default: [],
+    },
+    open_to_any_industry: {
+      type: Boolean,
+      default: false,
+    },
     role: {
       type: String,
       enum: ['holder', 'org_admin', 'platform_admin'],
@@ -92,6 +100,8 @@ passportHolderSchema.methods.toPublic = function () {
     avatar_key: this.avatar_key,
     intro_video_url: this.intro_video_url,
     bio: this.bio,
+    industries: this.industries,
+    open_to_any_industry: this.open_to_any_industry,
     role: this.role,
     created_at: this.created_at,
   };

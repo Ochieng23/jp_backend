@@ -7,6 +7,7 @@ import { asyncHandler } from '../middleware/asyncHandler.js';
 import { parsePagination, paginate } from '../utils/paginationUtils.js';
 import * as holderRepository from '../repositories/holderRepository.js';
 import * as auditRepository from '../repositories/auditRepository.js';
+import { INDUSTRIES } from '../constants/industries.js';
 import ShareLink from '../models/ShareLink.js';
 import Credential from '../models/Credential.js';
 import WorkExperience from '../models/WorkExperience.js';
@@ -59,6 +60,8 @@ const updateMeSchema = Joi.object({
   bio: Joi.string().max(600).allow(null, ''),
   avatar_key: Joi.string().max(2_000_000).pattern(AVATAR_KEY_PATTERN).allow(null, ''), // URL or base64 image data URI
   intro_video_url: Joi.string().uri({ scheme: ['http', 'https'] }).max(2000).allow(null, ''),
+  industries: Joi.array().items(Joi.string().valid(...INDUSTRIES)).max(INDUSTRIES.length),
+  open_to_any_industry: Joi.boolean(),
 }).min(1);
 
 // ── Parse expires_in like "1h", "7d", "30d" into seconds ──────────────────────
@@ -95,7 +98,18 @@ router.patch(
   authenticate,
   validate(updateMeSchema),
   asyncHandler(async (req, res) => {
-    const updated = await holderRepository.updateHolder(req.user.id, req.body);
+    const updates = { ...req.body };
+    // Mutual exclusion: choosing one clears the other, so a holder never
+    // ends up both "open to any industry" and holding a stale industries
+    // list (or vice versa) — mirrors the issuer_id/issuer_name clearing
+    // pattern in credentialRepository.updateCredential.
+    if (updates.open_to_any_industry === true) {
+      updates.industries = [];
+    } else if (Array.isArray(updates.industries) && updates.industries.length > 0) {
+      updates.open_to_any_industry = false;
+    }
+
+    const updated = await holderRepository.updateHolder(req.user.id, updates);
     if (!updated) {
       return res.status(404).json({ error: 'NOT_FOUND', message: 'Holder not found', requestId: req.id });
     }
