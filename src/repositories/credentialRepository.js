@@ -56,6 +56,39 @@ export async function updateCredentialStatus(id, status) {
 }
 
 /**
+ * Update a self-reported credential's editable fields. Only callable while
+ * proof_value === 'self-reported' — enforced by the route, not here, since
+ * the route needs to distinguish "not found" from "locked" for the client.
+ * @param {string} id
+ * @param {object} data
+ * @returns {Promise<object|null>}
+ */
+export async function updateCredential(id, data) {
+  const allowed = {};
+  for (const f of ['title', 'type', 'description', 'issued_at', 'expires_at', 'issuer_id', 'issuer_name', 'jurisdiction_id', 'document_url']) {
+    if (data[f] !== undefined) allowed[f] = data[f];
+  }
+  // Switching issuer mode: clear whichever of issuer_id/issuer_name isn't
+  // the one being set, so a credential never ends up with both a linked
+  // org and stale free-text issuer name (or vice versa).
+  if (allowed.issuer_id !== undefined) allowed.issuer_name = null;
+  else if (allowed.issuer_name !== undefined) allowed.issuer_id = null;
+
+  return Credential.findByIdAndUpdate(id, allowed, { new: true, runValidators: true }).lean();
+}
+
+/**
+ * Permanently delete a credential. No soft-delete field exists on this
+ * model (unlike Education/WorkExperience) — this is a real hard delete.
+ * @param {string} id
+ * @returns {Promise<boolean>} true if a document was deleted
+ */
+export async function deleteCredential(id) {
+  const res = await Credential.deleteOne({ _id: id });
+  return res.deletedCount > 0;
+}
+
+/**
  * Get a credential populated with its issuer organisation (and the issuer's
  * own jurisdiction). Returned as `issuer`/`jurisdiction` (not `issuer_id`/
  * `jurisdiction_id`) to match what verifyCredential() and the credential

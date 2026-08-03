@@ -26,6 +26,21 @@ const createCredentialSchema = Joi.object({
   .or('issuer_id', 'issuer_name')
   .messages({ 'object.missing': 'Please provide who issued this credential' });
 
+// Editing is only offered for self-reported credentials (see PATCH /:id),
+// so unlike create there's no issuer requirement here — a holder fixing a
+// typo in the title shouldn't be forced to also re-supply the issuer.
+const updateCredentialSchema = Joi.object({
+  type: Joi.string().min(2).max(100),
+  title: Joi.string().min(2).max(255),
+  description: Joi.string().max(2000).allow(null, ''),
+  issued_at: Joi.string().isoDate(),
+  expires_at: Joi.string().isoDate().allow(null, ''),
+  jurisdiction_id: Joi.string().allow(null, ''),
+  issuer_id: Joi.string().allow(null, ''),
+  issuer_name: Joi.string().min(2).max(255).allow(null, ''),
+  document_url: Joi.string().uri({ scheme: ['http', 'https'] }).allow(null, ''),
+}).min(1);
+
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
 /**
@@ -99,6 +114,72 @@ router.post(
   asyncHandler(async (req, res) => {
     const credential = await credentialService.selfReportCredential(req.user.id, req.body);
     res.status(201).json({ data: credential });
+  })
+);
+
+/**
+ * PATCH /api/credentials/:id
+ * Edit a self-reported credential's fields. Only the owning holder, and
+ * only while proof_value === 'self-reported' — a real signed VC's fields
+ * can't be edited without desyncing them from the cryptographic vc_json,
+ * so those must be revoked (or deleted) rather than edited.
+ */
+router.patch(
+  '/:id',
+  authenticate,
+  validate(updateCredentialSchema),
+  asyncHandler(async (req, res) => {
+    const credential = await credentialRepository.findCredentialById(req.params.id);
+    if (!credential) {
+      return res.status(404).json({ error: 'NOT_FOUND', message: 'Credential not found', requestId: req.id });
+    }
+    if (String(credential.holder_id) !== String(req.user.id)) {
+      return res.status(403).json({ error: 'FORBIDDEN', message: 'Not your credential', requestId: req.id });
+    }
+    if (credential.proof_value !== 'self-reported') {
+      return res.status(403).json({
+        error: 'FORBIDDEN',
+        message: 'This credential was issued by a verified organisation and cannot be edited',
+        requestId: req.id,
+      });
+    }
+
+    const updates = { ...req.body };
+    if (!updates.issuer_id && !updates.issuer_name &&
+        !credential.issuer_id && !credential.issuer_name) {
+      return res.status(422).json({
+        error: 'VALIDATION_ERROR',
+        message: 'Please provide who issued this credential',
+        requestId: req.id,
+      });
+    }
+
+    const updated = await credentialRepository.updateCredential(req.params.id, updates);
+    res.json({ data: updated });
+  })
+);
+
+/**
+ * DELETE /api/credentials/:id
+ * Permanently remove a credential. Always allowed for the owning holder —
+ * unlike editing, deleting a verified/signed credential doesn't risk
+ * desyncing displayed fields from anything, it's the holder removing an
+ * entry from their own profile (same reasoning already applied to
+ * verified Education/WorkExperience entries).
+ */
+router.delete(
+  '/:id',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const credential = await credentialRepository.findCredentialById(req.params.id);
+    if (!credential) {
+      return res.status(404).json({ error: 'NOT_FOUND', message: 'Credential not found', requestId: req.id });
+    }
+    if (String(credential.holder_id) !== String(req.user.id)) {
+      return res.status(403).json({ error: 'FORBIDDEN', message: 'Not your credential', requestId: req.id });
+    }
+    await credentialRepository.deleteCredential(req.params.id);
+    res.status(204).end();
   })
 );
 
