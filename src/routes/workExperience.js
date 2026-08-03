@@ -71,15 +71,17 @@ router.patch(
     if (!entry) {
       return res.status(404).json({ error: 'NOT_FOUND', message: 'Entry not found', requestId: req.id });
     }
-    if (String(entry.holder_id) !== String(req.user.id)) {
+    if (String(entry.holder_id) !== String(req.user.id) && req.user.role !== 'platform_admin') {
       return res.status(403).json({ error: 'FORBIDDEN', message: 'Not your entry', requestId: req.id });
     }
-    if (entry.verified) {
+    if (entry.verified && req.user.role !== 'platform_admin') {
       return res.status(403).json({ error: 'FORBIDDEN', message: 'This entry has been verified and can no longer be edited', requestId: req.id });
     }
     const updates = { ...req.body };
     if (updates.is_current) updates.end_date = null;
-    const updated = await workExperienceRepository.updateEntry(req.params.id, updates);
+    const updated = await workExperienceRepository.updateEntry(req.params.id, updates, {
+      bypassVerifiedLock: req.user.role === 'platform_admin',
+    });
     res.json({ data: updated });
   })
 );
@@ -95,7 +97,7 @@ router.delete(
     if (!entry) {
       return res.status(404).json({ error: 'NOT_FOUND', message: 'Entry not found', requestId: req.id });
     }
-    if (String(entry.holder_id) !== String(req.user.id)) {
+    if (String(entry.holder_id) !== String(req.user.id) && req.user.role !== 'platform_admin') {
       return res.status(403).json({ error: 'FORBIDDEN', message: 'Not your entry', requestId: req.id });
     }
     await workExperienceRepository.softDelete(req.params.id);
@@ -117,7 +119,7 @@ router.post(
     if (!entry) {
       return res.status(404).json({ error: 'NOT_FOUND', message: 'Entry not found', requestId: req.id });
     }
-    if (String(entry.holder_id) !== String(req.user.id)) {
+    if (String(entry.holder_id) !== String(req.user.id) && req.user.role !== 'platform_admin') {
       return res.status(403).json({ error: 'FORBIDDEN', message: 'Not your entry', requestId: req.id });
     }
     if (entry.verified) {

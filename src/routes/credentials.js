@@ -133,10 +133,10 @@ router.patch(
     if (!credential) {
       return res.status(404).json({ error: 'NOT_FOUND', message: 'Credential not found', requestId: req.id });
     }
-    if (String(credential.holder_id) !== String(req.user.id)) {
+    if (String(credential.holder_id) !== String(req.user.id) && req.user.role !== 'platform_admin') {
       return res.status(403).json({ error: 'FORBIDDEN', message: 'Not your credential', requestId: req.id });
     }
-    if (credential.proof_value !== 'self-reported') {
+    if (credential.proof_value !== 'self-reported' && req.user.role !== 'platform_admin') {
       return res.status(403).json({
         error: 'FORBIDDEN',
         message: 'This credential was issued by a verified organisation and cannot be edited',
@@ -175,7 +175,7 @@ router.delete(
     if (!credential) {
       return res.status(404).json({ error: 'NOT_FOUND', message: 'Credential not found', requestId: req.id });
     }
-    if (String(credential.holder_id) !== String(req.user.id)) {
+    if (String(credential.holder_id) !== String(req.user.id) && req.user.role !== 'platform_admin') {
       return res.status(403).json({ error: 'FORBIDDEN', message: 'Not your credential', requestId: req.id });
     }
     await credentialRepository.deleteCredential(req.params.id);
@@ -197,7 +197,7 @@ router.post(
     if (!credential) {
       return res.status(404).json({ error: 'NOT_FOUND', message: 'Credential not found', requestId: req.id });
     }
-    if (String(credential.holder_id) !== String(req.user.id)) {
+    if (String(credential.holder_id) !== String(req.user.id) && req.user.role !== 'platform_admin') {
       return res.status(403).json({ error: 'FORBIDDEN', message: 'Not your credential', requestId: req.id });
     }
     if (credential.verified) {

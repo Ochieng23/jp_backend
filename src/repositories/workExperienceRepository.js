@@ -16,16 +16,14 @@ export async function findById(id) {
   return WorkExperience.findOne({ _id: id, deleted_at: null }).lean();
 }
 
-export async function updateEntry(id, data) {
+export async function updateEntry(id, data, { bypassVerifiedLock = false } = {}) {
   const allowed = {};
   for (const f of ['employer_name', 'job_title', 'start_date', 'end_date', 'is_current', 'location', 'jurisdiction_id', 'description', 'document_url']) {
     if (data[f] !== undefined) allowed[f] = data[f];
   }
-  return WorkExperience.findOneAndUpdate(
-    { _id: id, deleted_at: null, verified: false },
-    allowed,
-    { new: true, runValidators: true }
-  ).lean();
+  const query = { _id: id, deleted_at: null };
+  if (!bypassVerifiedLock) query.verified = false;
+  return WorkExperience.findOneAndUpdate(query, allowed, { new: true, runValidators: true }).lean();
 }
 
 export async function softDelete(id) {
