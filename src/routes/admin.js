@@ -1,5 +1,7 @@
 import { Router } from 'express';
+import Joi from 'joi';
 import { v4 as uuidv4 } from 'uuid';
+import { validate } from '../middleware/validate.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { parsePagination, paginate } from '../utils/paginationUtils.js';
@@ -7,11 +9,27 @@ import * as auditRepository from '../repositories/auditRepository.js';
 import * as educationRepository from '../repositories/educationRepository.js';
 import * as workExperienceRepository from '../repositories/workExperienceRepository.js';
 import * as credentialRepository from '../repositories/credentialRepository.js';
+import * as holderRepository from '../repositories/holderRepository.js';
+import { INDUSTRIES } from '../constants/industries.js';
 
 const router = Router();
 
 // All admin routes require platform_admin role
 router.use(authenticate, requireRole('platform_admin'));
+
+const updateRoleSchema = Joi.object({
+  role: Joi.string().valid('holder', 'org_admin', 'platform_admin').required(),
+});
+
+const updateHolderSchema = Joi.object({
+  full_name: Joi.string().min(2).max(120),
+  phone: Joi.string().min(5).max(30).allow(null, ''),
+  nationality: Joi.string().min(2).max(80),
+  date_of_birth: Joi.string().isoDate(),
+  bio: Joi.string().max(600).allow(null, ''),
+  industries: Joi.array().items(Joi.string().valid(...INDUSTRIES)).max(INDUSTRIES.length),
+  open_to_any_industry: Joi.boolean(),
+}).min(1);
 
 /**
  * GET /api/admin/audit
@@ -49,9 +67,9 @@ router.get(
 
 /**
  * GET /api/admin/stats
- * Get aggregate statistics from the audit log:
- * - counts by actor type, action, resource type
- * - daily activity for the past 30 days
+ * Get aggregate platform statistics: counts by actor type, action, and
+ * resource type from the audit log, plus platform-wide totals and
+ * pending-verification counts for the admin dashboard.
  */
 router.get(
   '/stats',
@@ -195,6 +213,150 @@ router.patch(
     });
 
     res.json({ data: verified });
+  })
+);
+
+/**
+ * GET /api/admin/holders
+ * List/search all holders, paginated.
+ */
+router.get(
+  '/holders',
+  asyncHandler(async (req, res) => {
+    const { page, pageSize, offset } = parsePagination(req.query);
+    const { rows, total } = await holderRepository.findAll({
+      search: req.query.search,
+      limit: pageSize,
+      offset,
+    });
+    res.json(paginate(rows, total, page, pageSize));
+  })
+);
+
+/**
+ * PATCH /api/admin/holders/:id/role
+ * Change a holder's role (holder/org_admin/platform_admin).
+ */
+router.patch(
+  '/holders/:id/role',
+  validate(updateRoleSchema),
+  asyncHandler(async (req, res) => {
+    const holder = await holderRepository.findHolderById(req.params.id);
+    if (!holder) {
+      return res.status(404).json({ error: 'NOT_FOUND', message: 'Holder not found', requestId: req.id });
+    }
+
+    // Guardrail: an admin can't demote their own account. This doesn't
+    // fully prevent a platform ending up with zero platform_admins (another
+    // admin could still demote this account), but blocks the most common
+    // way to accidentally lock yourself out.
+    if (String(req.user.id) === String(req.params.id) && req.body.role !== 'platform_admin') {
+      return res.status(400).json({
+        error: 'VALIDATION_ERROR',
+        message: 'You cannot change your own role',
+        requestId: req.id,
+      });
+    }
+
+    const updated = await holderRepository.updateRole(req.params.id, req.body.role);
+
+    await auditRepository.logAction({
+      id: uuidv4(),
+      actor_id: req.user.id,
+      actor_type: 'admin',
+      action: 'holder.role_changed',
+      resource_type: 'holder',
+      resource_id: req.params.id,
+      metadata: { from: holder.role, to: req.body.role },
+      ip_address: req.ip,
+    });
+
+    res.json({ data: updated });
+  })
+);
+
+/**
+ * GET /api/admin/holders/:id
+ * Full holder profile plus every credential, education, and work
+ * experience record — no status/verified/deleted filtering, so the admin
+ * sees everything (revoked credentials, soft-deleted entries included).
+ */
+router.get(
+  '/holders/:id',
+  asyncHandler(async (req, res) => {
+    const profile = await holderRepository.getFullProfile(req.params.id);
+    if (!profile) {
+      return res.status(404).json({ error: 'NOT_FOUND', message: 'Holder not found', requestId: req.id });
+    }
+    res.json({ data: profile });
+  })
+);
+
+/**
+ * PATCH /api/admin/holders/:id
+ * Edit a holder's profile fields on their behalf.
+ */
+router.patch(
+  '/holders/:id',
+  validate(updateHolderSchema),
+  asyncHandler(async (req, res) => {
+    const holder = await holderRepository.findHolderById(req.params.id);
+    if (!holder) {
+      return res.status(404).json({ error: 'NOT_FOUND', message: 'Holder not found', requestId: req.id });
+    }
+
+    const updated = await holderRepository.updateHolder(req.params.id, req.body);
+
+    await auditRepository.logAction({
+      id: uuidv4(),
+      actor_id: req.user.id,
+      actor_type: 'admin',
+      action: 'holder.profile_edited',
+      resource_type: 'holder',
+      resource_id: req.params.id,
+      metadata: { fields: Object.keys(req.body) },
+      ip_address: req.ip,
+    });
+
+    res.json({ data: updated });
+  })
+);
+
+/**
+ * DELETE /api/admin/holders/:id
+ * Permanently delete a holder and every record that belongs to them
+ * (credentials, education, work experience, share links). Irreversible.
+ */
+router.delete(
+  '/holders/:id',
+  asyncHandler(async (req, res) => {
+    const holder = await holderRepository.findHolderById(req.params.id);
+    if (!holder) {
+      return res.status(404).json({ error: 'NOT_FOUND', message: 'Holder not found', requestId: req.id });
+    }
+
+    if (String(req.user.id) === String(req.params.id)) {
+      return res.status(400).json({
+        error: 'VALIDATION_ERROR',
+        message: 'You cannot delete your own account',
+        requestId: req.id,
+      });
+    }
+
+    await holderRepository.deleteHolder(req.params.id);
+
+    await auditRepository.logAction({
+      id: uuidv4(),
+      actor_id: req.user.id,
+      actor_type: 'admin',
+      action: 'holder.deleted',
+      resource_type: 'holder',
+      resource_id: req.params.id,
+      metadata: { full_name: holder.full_name, email: holder.email },
+      ip_address: req.ip,
+    });
+
+    res.status(204).end();
   })
 );
 

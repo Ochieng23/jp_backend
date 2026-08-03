@@ -1,6 +1,9 @@
 import AuditLog from '../models/AuditLog.js';
 import Credential from '../models/Credential.js';
 import IssuingOrganization from '../models/IssuingOrganization.js';
+import Jurisdiction from '../models/Jurisdiction.js';
+import Education from '../models/Education.js';
+import WorkExperience from '../models/WorkExperience.js';
 
 /**
  * Insert a new audit log entry.
@@ -73,34 +76,61 @@ export async function findAll(filters = {}, pagination = {}) {
  * @returns {Promise<object>}
  */
 export async function getStats() {
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-
-  const [byActorType, byAction, byResourceType, holderCount, credentialCount, orgCount] =
-    await Promise.all([
-      AuditLog.aggregate([
-        { $group: { _id: '$actor_type', count: { $sum: 1 } } },
-        { $sort: { count: -1 } },
-      ]),
-      AuditLog.aggregate([
-        { $group: { _id: '$action', count: { $sum: 1 } } },
-        { $sort: { count: -1 } },
-        { $limit: 20 },
-      ]),
-      AuditLog.aggregate([
-        { $group: { _id: '$resource_type', count: { $sum: 1 } } },
-        { $sort: { count: -1 } },
-      ]),
-      // Dynamic platform-level stats
-      import('../models/PassportHolder.js').then((m) => m.default.countDocuments()),
-      Credential.countDocuments({ status: 'active' }),
-      IssuingOrganization.countDocuments({ verified: true }),
-    ]);
+  const [
+    byActorType,
+    byAction,
+    byResourceType,
+    holderCount,
+    totalCredentialCount,
+    activeCredentialCount,
+    totalOrgCount,
+    verifiedOrgCount,
+    jurisdictionCount,
+    pendingEducationCount,
+    pendingWorkExperienceCount,
+    pendingCredentialCount,
+  ] = await Promise.all([
+    AuditLog.aggregate([
+      { $group: { _id: '$actor_type', count: { $sum: 1 } } },
+      { $sort: { count: -1 } },
+    ]),
+    AuditLog.aggregate([
+      { $group: { _id: '$action', count: { $sum: 1 } } },
+      { $sort: { count: -1 } },
+      { $limit: 20 },
+    ]),
+    AuditLog.aggregate([
+      { $group: { _id: '$resource_type', count: { $sum: 1 } } },
+      { $sort: { count: -1 } },
+    ]),
+    // Dynamic platform-level stats
+    import('../models/PassportHolder.js').then((m) => m.default.countDocuments()),
+    Credential.countDocuments(),
+    Credential.countDocuments({ status: 'active' }),
+    IssuingOrganization.countDocuments(),
+    IssuingOrganization.countDocuments({ verified: true }),
+    Jurisdiction.countDocuments(),
+    Education.countDocuments({ verified: false, deleted_at: null }),
+    WorkExperience.countDocuments({ verified: false, deleted_at: null }),
+    // $ne (not $eq false) so credentials that predate the `verified` field
+    // (entirely absent, not stored as false) still count as pending.
+    Credential.countDocuments({ verified: { $ne: true } }),
+  ]);
 
   return {
     platform: {
       total_holders: holderCount,
-      active_credentials: credentialCount,
-      verified_organizations: orgCount,
+      total_credentials: totalCredentialCount,
+      active_credentials: activeCredentialCount,
+      total_organizations: totalOrgCount,
+      verified_organizations: verifiedOrgCount,
+      total_jurisdictions: jurisdictionCount,
+      pending_verifications: {
+        education: pendingEducationCount,
+        work_experience: pendingWorkExperienceCount,
+        credentials: pendingCredentialCount,
+        total: pendingEducationCount + pendingWorkExperienceCount + pendingCredentialCount,
+      },
     },
     by_actor_type: byActorType.map((r) => ({ actor_type: r._id, count: r.count })),
     by_action: byAction.map((r) => ({ action: r._id, count: r.count })),
