@@ -73,6 +73,9 @@ router.patch(
     if (String(entry.holder_id) !== String(req.user.id)) {
       return res.status(403).json({ error: 'FORBIDDEN', message: 'Not your entry', requestId: req.id });
     }
+    if (entry.verified) {
+      return res.status(403).json({ error: 'FORBIDDEN', message: 'This entry has been verified and can no longer be edited', requestId: req.id });
+    }
     const updates = { ...req.body };
     if (updates.is_current) updates.end_date = null;
     const updated = await educationRepository.updateEntry(req.params.id, updates);

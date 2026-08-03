@@ -16,6 +16,7 @@ const createWorkExpSchema = Joi.object({
   location: Joi.string().max(255).optional().allow(null, ''),
   jurisdiction_id: Joi.string().optional().allow(null, ''),
   description: Joi.string().max(2000).optional().allow(null, ''),
+  document_url: Joi.string().uri({ scheme: ['http', 'https'] }).optional().allow(null, ''),
 });
 
 const updateWorkExpSchema = Joi.object({
@@ -27,6 +28,7 @@ const updateWorkExpSchema = Joi.object({
   location: Joi.string().max(255).allow(null, ''),
   jurisdiction_id: Joi.string().allow(null, ''),
   description: Joi.string().max(2000).allow(null, ''),
+  document_url: Joi.string().uri({ scheme: ['http', 'https'] }).allow(null, ''),
 }).min(1);
 
 /**
@@ -71,6 +73,9 @@ router.patch(
     }
     if (String(entry.holder_id) !== String(req.user.id)) {
       return res.status(403).json({ error: 'FORBIDDEN', message: 'Not your entry', requestId: req.id });
+    }
+    if (entry.verified) {
+      return res.status(403).json({ error: 'FORBIDDEN', message: 'This entry has been verified and can no longer be edited', requestId: req.id });
     }
     const updates = { ...req.body };
     if (updates.is_current) updates.end_date = null;
