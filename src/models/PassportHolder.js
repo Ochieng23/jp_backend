@@ -72,6 +72,29 @@ const passportHolderSchema = new Schema(
       enum: ['holder', 'org_admin', 'platform_admin'],
       default: 'holder',
     },
+    email_verified: {
+      type: Boolean,
+      default: false,
+    },
+    // select: false — never returned by a default query (mirrors
+    // password_hash). Repository functions that need to look these up
+    // explicitly .select('+field'), same convention as password_hash.
+    email_verification_token: {
+      type: String,
+      select: false,
+    },
+    email_verification_expires: {
+      type: Date,
+      select: false,
+    },
+    password_reset_token: {
+      type: String,
+      select: false,
+    },
+    password_reset_expires: {
+      type: Date,
+      select: false,
+    },
   },
   {
     timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },
@@ -103,6 +126,7 @@ passportHolderSchema.methods.toPublic = function () {
     industries: this.industries,
     open_to_any_industry: this.open_to_any_industry,
     role: this.role,
+    email_verified: this.email_verified,
     created_at: this.created_at,
   };
 };

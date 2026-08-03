@@ -63,6 +63,89 @@ export async function findHolderById(id) {
 }
 
 /**
+ * Store a freshly generated email-verification token on a holder.
+ * @param {string} id
+ * @param {string} token
+ * @param {Date} expires
+ */
+export async function setEmailVerificationToken(id, token, expires) {
+  await PassportHolder.findByIdAndUpdate(id, {
+    email_verification_token: token,
+    email_verification_expires: expires,
+  });
+}
+
+/**
+ * Find a holder by an unexpired email-verification token.
+ * @param {string} token
+ * @returns {Promise<object|null>}
+ */
+export async function findHolderByVerificationToken(token) {
+  const holder = await PassportHolder.findOne({
+    email_verification_token: token,
+    email_verification_expires: { $gt: new Date() },
+  })
+    .select('+email_verification_token +email_verification_expires')
+    .lean();
+  return omitUnhcrId(holder);
+}
+
+/**
+ * Mark a holder's email verified and clear the verification token.
+ * @param {string} id
+ * @returns {Promise<object|null>}
+ */
+export async function markEmailVerified(id) {
+  return omitUnhcrId(
+    await PassportHolder.findByIdAndUpdate(
+      id,
+      { email_verified: true, $unset: { email_verification_token: '', email_verification_expires: '' } },
+      { new: true }
+    ).lean()
+  );
+}
+
+/**
+ * Store a freshly generated password-reset token on a holder.
+ * @param {string} id
+ * @param {string} token
+ * @param {Date} expires
+ */
+export async function setPasswordResetToken(id, token, expires) {
+  await PassportHolder.findByIdAndUpdate(id, {
+    password_reset_token: token,
+    password_reset_expires: expires,
+  });
+}
+
+/**
+ * Find a holder by an unexpired password-reset token.
+ * @param {string} token
+ * @returns {Promise<object|null>}
+ */
+export async function findHolderByResetToken(token) {
+  const holder = await PassportHolder.findOne({
+    password_reset_token: token,
+    password_reset_expires: { $gt: new Date() },
+  })
+    .select('+password_reset_token +password_reset_expires')
+    .lean();
+  return omitUnhcrId(holder);
+}
+
+/**
+ * Set a new password hash and clear the reset token.
+ * @param {string} id
+ * @param {string} passwordHash
+ */
+export async function resetPassword(id, passwordHash) {
+  await PassportHolder.findByIdAndUpdate(id, {
+    password_hash: passwordHash,
+    $unset: { password_reset_token: '', password_reset_expires: '' },
+  });
+}
+
+/**
  * Update allowed profile fields. Does NOT allow changing email or password
  * (or unhcr_id, which isn't a client-settable field at all).
  * @param {string} id

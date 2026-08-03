@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import Joi from 'joi';
@@ -7,9 +8,26 @@ import { authenticate } from '../middleware/auth.js';
 import { authLimiter } from '../middleware/rateLimiter.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import * as holderRepository from '../repositories/holderRepository.js';
+import { sendEmail, verificationEmail, passwordResetEmail } from '../services/emailService.js';
 import logger from '../utils/logger.js';
 
 const router = Router();
+
+const EMAIL_VERIFICATION_TTL_MS = 24 * 60 * 60 * 1000; // 24h
+const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000; // 1h
+
+function generateToken() {
+  return crypto.randomBytes(32).toString('hex');
+}
+
+// Fire-and-forget: never let an email hiccup fail the request that
+// triggered it (registration/forgot-password should still succeed even if
+// ACS is briefly unavailable).
+function sendEmailSafely(to, subject, html) {
+  sendEmail(to, subject, html).catch((err) => {
+    logger.error(`[auth] Failed to send email to ${to}: ${err.message}`);
+  });
+}
 
 // ─── Validation schemas ───────────────────────────────────────────────────────
 
@@ -34,6 +52,15 @@ const loginSchema = Joi.object({
 
 const refreshSchema = Joi.object({
   refreshToken: Joi.string().required(),
+});
+
+const forgotPasswordSchema = Joi.object({
+  email: Joi.string().email().lowercase().required(),
+});
+
+const resetPasswordSchema = Joi.object({
+  token: Joi.string().required(),
+  password: Joi.string().min(8).max(128).required(),
 });
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -95,6 +122,15 @@ router.post(
     const holderId = String(holder.id || holder._id);
     const { accessToken, refreshToken } = issueTokens(holderId, email);
 
+    const verificationToken = generateToken();
+    await holderRepository.setEmailVerificationToken(
+      holderId,
+      verificationToken,
+      new Date(Date.now() + EMAIL_VERIFICATION_TTL_MS)
+    );
+    const verifyUrl = `${process.env.FRONTEND_URL}/verify-email?token=${verificationToken}`;
+    sendEmailSafely(email, 'Verify your Cazini Job Passport email', verificationEmail(full_name, verifyUrl));
+
     logger.info(`New holder registered: ${holderId} (${email})`);
 
     res.status(201).json({
@@ -143,6 +179,121 @@ router.post(
       accessToken,
       refreshToken,
     });
+  })
+);
+
+/**
+ * GET /api/auth/verify-email?token=...
+ */
+router.get(
+  '/verify-email',
+  asyncHandler(async (req, res) => {
+    const { token } = req.query;
+    if (!token || typeof token !== 'string') {
+      return res.status(400).json({ error: 'VALIDATION_ERROR', message: 'Missing token', requestId: req.id });
+    }
+
+    const holder = await holderRepository.findHolderByVerificationToken(token);
+    if (!holder) {
+      return res.status(400).json({
+        error: 'VALIDATION_ERROR',
+        message: 'This verification link is invalid or has expired',
+        requestId: req.id,
+      });
+    }
+
+    const holderId = String(holder.id || holder._id);
+    await holderRepository.markEmailVerified(holderId);
+
+    logger.info(`Holder verified email: ${holderId}`);
+    res.json({ message: 'Email verified successfully' });
+  })
+);
+
+/**
+ * POST /api/auth/resend-verification
+ */
+router.post(
+  '/resend-verification',
+  authenticate,
+  authLimiter,
+  asyncHandler(async (req, res) => {
+    const holder = await holderRepository.findHolderById(req.user.id);
+    if (!holder) {
+      return res.status(404).json({ error: 'NOT_FOUND', message: 'Account not found', requestId: req.id });
+    }
+    if (holder.email_verified) {
+      return res.json({ message: 'Your email is already verified' });
+    }
+
+    const verificationToken = generateToken();
+    await holderRepository.setEmailVerificationToken(
+      req.user.id,
+      verificationToken,
+      new Date(Date.now() + EMAIL_VERIFICATION_TTL_MS)
+    );
+    const verifyUrl = `${process.env.FRONTEND_URL}/verify-email?token=${verificationToken}`;
+    sendEmailSafely(holder.email, 'Verify your Cazini Job Passport email', verificationEmail(holder.full_name, verifyUrl));
+
+    res.json({ message: 'Verification email sent' });
+  })
+);
+
+/**
+ * POST /api/auth/forgot-password
+ * Always responds with the same generic message regardless of whether the
+ * email exists, to avoid leaking which emails are registered.
+ */
+router.post(
+  '/forgot-password',
+  authLimiter,
+  validate(forgotPasswordSchema),
+  asyncHandler(async (req, res) => {
+    const { email } = req.body;
+    const genericMessage = "If an account exists for that email, we've sent a password reset link";
+
+    const holder = await holderRepository.findHolderByEmail(email);
+    if (holder) {
+      const holderId = String(holder.id || holder._id);
+      const resetToken = generateToken();
+      await holderRepository.setPasswordResetToken(
+        holderId,
+        resetToken,
+        new Date(Date.now() + PASSWORD_RESET_TTL_MS)
+      );
+      const resetUrl = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}`;
+      sendEmailSafely(email, 'Reset your Cazini Job Passport password', passwordResetEmail(holder.full_name, resetUrl));
+    }
+
+    res.json({ message: genericMessage });
+  })
+);
+
+/**
+ * POST /api/auth/reset-password
+ */
+router.post(
+  '/reset-password',
+  authLimiter,
+  validate(resetPasswordSchema),
+  asyncHandler(async (req, res) => {
+    const { token, password } = req.body;
+
+    const holder = await holderRepository.findHolderByResetToken(token);
+    if (!holder) {
+      return res.status(400).json({
+        error: 'VALIDATION_ERROR',
+        message: 'This password reset link is invalid or has expired',
+        requestId: req.id,
+      });
+    }
+
+    const holderId = String(holder.id || holder._id);
+    const password_hash = await bcrypt.hash(password, 12);
+    await holderRepository.resetPassword(holderId, password_hash);
+
+    logger.info(`Holder reset password: ${holderId}`);
+    res.json({ message: 'Password reset successfully' });
   })
 );
 
