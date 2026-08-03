@@ -254,6 +254,38 @@ export async function deleteHolder(id) {
  * @param {string} id
  * @returns {Promise<object|null>}
  */
+/**
+ * Weighted profile-completion checklist. Photo/video/bio/etc together are
+ * worth 30%; at least one Education, Work Experience, and Credential entry
+ * are worth 15% each (45% total) — a candidate can't show 100% with an
+ * empty passport, since the credentials in it are the actual point of the
+ * product, not just the surrounding profile fields.
+ * @returns {{ percentage: number, items: Array }}
+ */
+function computeProfileCompletion(holder, { hasEducation, hasWorkExperience, hasCredential }) {
+  const items = [
+    { key: 'avatar', label: 'Add a profile photo', done: Boolean(holder.avatar_key), weight: 10, href: '/settings' },
+    { key: 'video', label: 'Add an intro video', done: Boolean(holder.intro_video_url), weight: 10, href: '/settings' },
+    { key: 'bio', label: 'Write a short bio', done: Boolean(holder.bio), weight: 10, href: '/settings' },
+    { key: 'dob', label: 'Add your date of birth', done: Boolean(holder.date_of_birth), weight: 5, href: '/settings' },
+    { key: 'nationality', label: 'Add your nationality', done: Boolean(holder.nationality), weight: 5, href: '/settings' },
+    { key: 'phone', label: 'Add a phone number', done: Boolean(holder.phone), weight: 5, href: '/settings' },
+    {
+      key: 'industries',
+      label: 'Set your industry preferences',
+      done: Boolean(holder.open_to_any_industry) || (holder.industries?.length || 0) > 0,
+      weight: 10,
+      href: '/settings',
+    },
+    { key: 'education', label: 'Add an education entry', done: hasEducation, weight: 15, href: '/education' },
+    { key: 'work_experience', label: 'Add a work experience entry', done: hasWorkExperience, weight: 15, href: '/work-history' },
+    { key: 'credentials', label: 'Add a credential', done: hasCredential, weight: 15, href: '/credentials' },
+  ];
+
+  const percentage = items.reduce((sum, item) => sum + (item.done ? item.weight : 0), 0);
+  return { percentage, items };
+}
+
 export async function getHolderWithCredentialSummary(id) {
   const holder = await PassportHolder.findById(id).lean();
   if (!holder) return null;
@@ -271,11 +303,21 @@ export async function getHolderWithCredentialSummary(id) {
     recognition_status: 'recognised',
   }).distinct('target_jurisdiction_id');
 
+  const [educationCount, workExperienceCount] = await Promise.all([
+    Education.countDocuments({ holder_id: holder._id, deleted_at: null }),
+    WorkExperience.countDocuments({ holder_id: holder._id, deleted_at: null }),
+  ]);
+
   const result = {
     ...holder,
     id: holder._id,
     credential_summary: typeCounts.map((t) => ({ type: t._id, count: t.count })),
     jurisdictions_active: activeJurisdictionIds,
+    profile_completion: computeProfileCompletion(holder, {
+      hasEducation: educationCount > 0,
+      hasWorkExperience: workExperienceCount > 0,
+      hasCredential: credIds.length > 0,
+    }),
   };
   delete result.unhcr_id;
   return result;
