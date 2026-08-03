@@ -38,9 +38,9 @@ const refreshSchema = Joi.object({
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function issueTokens(holderId, email) {
+function issueTokens(holderId, email, role = 'holder') {
   const accessToken = jwt.sign(
-    { id: holderId, email, role: 'holder' },
+    { id: holderId, email, role },
     process.env.JWT_ACCESS_SECRET,
     { expiresIn: process.env.JWT_ACCESS_TTL || '15m', subject: holderId }
   );
@@ -134,7 +134,7 @@ router.post(
     }
 
     const holderId = String(holder.id || holder._id);
-    const { accessToken, refreshToken } = issueTokens(holderId, holder.email);
+    const { accessToken, refreshToken } = issueTokens(holderId, holder.email, holder.role);
 
     logger.info(`Holder logged in: ${holderId}`);
 
@@ -168,7 +168,15 @@ router.post(
     }
 
     const { id: holderId, email } = decoded;
-    const { accessToken: newAccessToken, refreshToken: newRefreshToken } = issueTokens(holderId, email);
+    const holder = await holderRepository.findHolderById(holderId);
+    if (!holder) {
+      return res.status(401).json({
+        error: 'UNAUTHORIZED',
+        message: 'Account no longer exists',
+        requestId: req.id,
+      });
+    }
+    const { accessToken: newAccessToken, refreshToken: newRefreshToken } = issueTokens(holderId, email, holder.role);
 
     res.json({
       accessToken: newAccessToken,
