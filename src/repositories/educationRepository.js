@@ -18,7 +18,7 @@ export async function findById(id) {
 
 export async function updateEntry(id, data) {
   const allowed = {};
-  for (const f of ['institution_name', 'qualification', 'start_date', 'end_date', 'is_current', 'location', 'jurisdiction_id', 'description']) {
+  for (const f of ['institution_name', 'qualification', 'start_date', 'end_date', 'is_current', 'location', 'jurisdiction_id', 'description', 'document_url']) {
     if (data[f] !== undefined) allowed[f] = data[f];
   }
   return Education.findOneAndUpdate(

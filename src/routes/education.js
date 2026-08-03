@@ -16,7 +16,7 @@ const createEducationSchema = Joi.object({
   location: Joi.string().max(255).optional().allow(null, ''),
   jurisdiction_id: Joi.string().optional().allow(null, ''),
   description: Joi.string().max(2000).optional().allow(null, ''),
-  document_url: Joi.string().max(2_000_000).optional().allow(null, ''),
+  document_url: Joi.string().uri({ scheme: ['http', 'https'] }).optional().allow(null, ''),
 });
 
 const updateEducationSchema = Joi.object({
@@ -28,7 +28,7 @@ const updateEducationSchema = Joi.object({
   location: Joi.string().max(255).allow(null, ''),
   jurisdiction_id: Joi.string().allow(null, ''),
   description: Joi.string().max(2000).allow(null, ''),
-  document_url: Joi.string().max(2_000_000).allow(null, ''),
+  document_url: Joi.string().uri({ scheme: ['http', 'https'] }).allow(null, ''),
 }).min(1);
 
 /**
