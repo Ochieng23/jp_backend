@@ -2,6 +2,9 @@ import { v4 as uuidv4 } from 'uuid';
 import PassportHolder from '../models/PassportHolder.js';
 import Credential from '../models/Credential.js';
 import CredentialRecognition from '../models/CredentialRecognition.js';
+import Education from '../models/Education.js';
+import WorkExperience from '../models/WorkExperience.js';
+import ShareLink from '../models/ShareLink.js';
 
 // ─── unhcr_id: internal-only index workaround ──────────────────────────────
 //
@@ -77,6 +80,90 @@ export async function updateHolder(id, data) {
       runValidators: true,
     }).lean()
   );
+}
+
+/**
+ * Find all holders with optional name/email search, paginated. Admin-only
+ * listing (enforced by the route) — no unhcr_id stripping needed since
+ * this never returns password_hash and admins already see full profiles.
+ * @param {object} [filters] - { search?, limit?, offset? }
+ * @returns {Promise<{ rows: object[], total: number }>}
+ */
+export async function findAll(filters = {}) {
+  const q = {};
+  if (filters.search) {
+    q.$or = [
+      { full_name: { $regex: filters.search, $options: 'i' } },
+      { email: { $regex: filters.search, $options: 'i' } },
+    ];
+  }
+
+  const total = await PassportHolder.countDocuments(q);
+  const limit = filters.limit || 20;
+  const skip = filters.offset || 0;
+
+  const rows = await PassportHolder.find(q)
+    .sort({ created_at: -1 })
+    .skip(skip)
+    .limit(limit)
+    .lean();
+
+  return { rows: rows.map(omitUnhcrId), total };
+}
+
+/**
+ * Change a holder's role. Admin-only action (enforced by the route).
+ * @param {string} id
+ * @param {'holder'|'org_admin'|'platform_admin'} role
+ * @returns {Promise<object|null>}
+ */
+export async function updateRole(id, role) {
+  return omitUnhcrId(
+    await PassportHolder.findByIdAndUpdate(id, { role }, { new: true, runValidators: true }).lean()
+  );
+}
+
+/**
+ * Get a holder's complete data — profile plus every credential, education,
+ * and work experience record, with no status/verified/deleted filtering.
+ * Admin-only (enforced by the route): unlike the holder's own dashboard
+ * views, this is meant to show everything, including revoked credentials
+ * and soft-deleted entries, so an admin can see the full picture.
+ * @param {string} id
+ * @returns {Promise<object|null>}
+ */
+export async function getFullProfile(id) {
+  const holder = omitUnhcrId(await PassportHolder.findById(id).lean());
+  if (!holder) return null;
+
+  const [credentials, education, workExperience] = await Promise.all([
+    Credential.find({ holder_id: id }).sort({ created_at: -1 }).lean(),
+    Education.find({ holder_id: id }).sort({ created_at: -1 }).lean(),
+    WorkExperience.find({ holder_id: id }).sort({ created_at: -1 }).lean(),
+  ]);
+
+  return { holder, credentials, education, work_experience: workExperience };
+}
+
+/**
+ * Permanently delete a holder and every record that belongs to them
+ * (credentials, education, work experience, share links). Admin-only,
+ * irreversible (enforced/confirmed by the route and frontend).
+ * @param {string} id
+ * @returns {Promise<boolean>} true if the holder existed and was deleted
+ */
+export async function deleteHolder(id) {
+  const holder = await PassportHolder.findById(id);
+  if (!holder) return false;
+
+  await Promise.all([
+    Credential.deleteMany({ holder_id: id }),
+    Education.deleteMany({ holder_id: id }),
+    WorkExperience.deleteMany({ holder_id: id }),
+    ShareLink.deleteMany({ holder_id: id }),
+  ]);
+  await PassportHolder.deleteOne({ _id: id });
+  return true;
 }
 
 /**
