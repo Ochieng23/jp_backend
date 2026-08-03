@@ -50,7 +50,22 @@ export async function verifyEntry(id) {
 }
 
 /**
+ * Holder-triggered: flag an entry as awaiting admin review. Does not
+ * verify it — only surfaces it (sorted first) in the admin pending queue.
+ * @param {string} id
+ * @returns {Promise<object|null>}
+ */
+export async function requestVerification(id) {
+  return Education.findOneAndUpdate(
+    { _id: id, deleted_at: null },
+    { verification_requested_at: new Date() },
+    { new: true }
+  ).lean();
+}
+
+/**
  * Find all not-yet-verified entries across every holder, for admin review.
+ * Entries with a pending holder request are surfaced first.
  * @param {object} [filters] - { limit?, offset? }
  * @returns {Promise<{ rows: object[], total: number }>}
  */
@@ -67,6 +82,8 @@ export async function findAllPending(filters = {}) {
     .populate('holder_id', 'full_name email')
     .populate('jurisdiction_id', 'country_code country_name')
     .lean();
+
+  rows.sort((a, b) => Boolean(b.verification_requested_at) - Boolean(a.verification_requested_at));
 
   return { rows, total };
 }

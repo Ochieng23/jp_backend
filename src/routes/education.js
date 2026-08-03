@@ -102,4 +102,29 @@ router.delete(
   })
 );
 
+/**
+ * POST /api/education/:id/request-verification
+ * Holder-triggered: flag this entry for admin review. Does not verify it
+ * immediately — a platform_admin still has to confirm it via the admin
+ * verification queue.
+ */
+router.post(
+  '/:id/request-verification',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const entry = await educationRepository.findById(req.params.id);
+    if (!entry) {
+      return res.status(404).json({ error: 'NOT_FOUND', message: 'Entry not found', requestId: req.id });
+    }
+    if (String(entry.holder_id) !== String(req.user.id)) {
+      return res.status(403).json({ error: 'FORBIDDEN', message: 'Not your entry', requestId: req.id });
+    }
+    if (entry.verified) {
+      return res.status(422).json({ error: 'VALIDATION_ERROR', message: 'This entry is already verified', requestId: req.id });
+    }
+    const updated = await educationRepository.requestVerification(req.params.id);
+    res.json({ data: updated });
+  })
+);
+
 export default router;

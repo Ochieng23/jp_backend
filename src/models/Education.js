@@ -47,6 +47,10 @@ const educationSchema = new Schema(
       type: Schema.Types.ObjectId,
       ref: 'Credential',
     },
+    verification_requested_at: {
+      type: Date,
+      default: null,
+    },
     description: {
       type: String,
     },
