@@ -148,6 +148,14 @@ router.post(
       });
     }
 
+    if (job.applicationDeadline && new Date(job.applicationDeadline) < new Date()) {
+      return res.status(410).json({
+        error: 'GONE',
+        message: 'The application deadline for this job has passed',
+        requestId: req.id,
+      });
+    }
+
     let firstName, lastName, email, phone, holderId;
 
     if (req.user) {

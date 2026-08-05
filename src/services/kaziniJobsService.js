@@ -76,7 +76,10 @@ export async function listJobs({
   search,
 } = {}) {
   const all = await fetchAllJobs();
-  let filtered = all.filter((j) => j.is_active !== false);
+  const now = Date.now();
+  let filtered = all.filter(
+    (j) => j.is_active !== false && (!j.applicationDeadline || new Date(j.applicationDeadline).getTime() >= now)
+  );
 
   if (location) {
     const q = location.toLowerCase();
