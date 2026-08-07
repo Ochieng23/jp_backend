@@ -169,11 +169,21 @@ export async function updateHolder(id, data) {
  * Find all holders with optional name/email search, paginated. Admin-only
  * listing (enforced by the route) — no unhcr_id stripping needed since
  * this never returns password_hash and admins already see full profiles.
- * @param {object} [filters] - { search?, limit?, offset? }
+ *
+ * industry/expertise_area/seniority_level/classified filter on
+ * talent_classification, an unindexed field Cosmos DB for MongoDB can't
+ * efficiently query — when any of those are present this fetches every
+ * search-matching row and filters/paginates in JS instead of at the DB
+ * level (fine at this holder-pool size; see CLAUDE.md's Cosmos indexing
+ * note). The plain search-only path keeps its original DB-level pagination.
+ * @param {object} [filters] - { search?, role?, industry?, expertise_area?, seniority_level?, classified?, limit?, offset? }
  * @returns {Promise<{ rows: object[], total: number }>}
  */
 export async function findAll(filters = {}) {
   const q = {};
+  if (filters.role) {
+    q.role = filters.role;
+  }
   if (filters.search) {
     q.$or = [
       { full_name: { $regex: filters.search, $options: 'i' } },
@@ -181,17 +191,94 @@ export async function findAll(filters = {}) {
     ];
   }
 
-  const total = await PassportHolder.countDocuments(q);
   const limit = filters.limit || 20;
   const skip = filters.offset || 0;
+  const hasTalentFilter =
+    filters.industry || filters.expertise_area || filters.seniority_level || filters.classified !== undefined;
 
-  const rows = await PassportHolder.find(q)
-    .sort({ created_at: -1 })
-    .skip(skip)
-    .limit(limit)
-    .lean();
+  if (!hasTalentFilter) {
+    const total = await PassportHolder.countDocuments(q);
+    const rows = await PassportHolder.find(q).sort({ created_at: -1 }).skip(skip).limit(limit).lean();
+    return { rows: rows.map(omitUnhcrId), total };
+  }
 
-  return { rows: rows.map(omitUnhcrId), total };
+  let rows = await PassportHolder.find(q).sort({ created_at: -1 }).lean();
+  if (filters.classified !== undefined) {
+    const wantClassified = filters.classified === true || filters.classified === 'true';
+    rows = rows.filter((h) => Boolean(h.talent_classification) === wantClassified);
+  }
+  if (filters.industry) {
+    rows = rows.filter(
+      (h) =>
+        h.talent_classification?.primary_industry === filters.industry ||
+        h.talent_classification?.secondary_industries?.includes(filters.industry)
+    );
+  }
+  if (filters.expertise_area) {
+    const q2 = filters.expertise_area.toLowerCase();
+    rows = rows.filter((h) => h.talent_classification?.expertise_areas?.some((e) => e.toLowerCase().includes(q2)));
+  }
+  if (filters.seniority_level) {
+    rows = rows.filter((h) => h.talent_classification?.seniority_level === filters.seniority_level);
+  }
+
+  const total = rows.length;
+  return { rows: rows.slice(skip, skip + limit).map(omitUnhcrId), total };
+}
+
+/**
+ * Persist an AI-generated talent classification onto a holder.
+ * @param {string} id
+ * @param {object} classification - shape matches PassportHolder.talent_classification
+ * @returns {Promise<object|null>}
+ */
+export async function saveTalentClassification(id, classification) {
+  return omitUnhcrId(
+    await PassportHolder.findByIdAndUpdate(id, { talent_classification: classification }, { new: true }).lean()
+  );
+}
+
+/**
+ * Talent-pool breakdown for the admin analytics page: counts by primary
+ * industry, by seniority level, top expertise tags, and how many holders
+ * have never been classified. Computed in JS over a single lean() fetch
+ * rather than an aggregation pipeline — Cosmos DB for MongoDB's $group/
+ * $unwind support on unindexed nested fields is inconsistent (see
+ * CLAUDE.md), and the holder pool is small enough that this costs nothing.
+ * @returns {Promise<object>}
+ */
+export async function getTalentPoolStats() {
+  // Scoped to jobseekers only — the talent pool is candidates, not the
+  // platform/org admin accounts that also live in this collection.
+  const holders = await PassportHolder.find({ role: 'holder' }, 'talent_classification').lean();
+
+  const industryCounts = new Map();
+  const seniorityCounts = new Map();
+  const expertiseCounts = new Map();
+  let classifiedCount = 0;
+
+  for (const h of holders) {
+    const tc = h.talent_classification;
+    if (!tc) continue;
+    classifiedCount++;
+    if (tc.primary_industry) industryCounts.set(tc.primary_industry, (industryCounts.get(tc.primary_industry) || 0) + 1);
+    if (tc.seniority_level) seniorityCounts.set(tc.seniority_level, (seniorityCounts.get(tc.seniority_level) || 0) + 1);
+    for (const area of tc.expertise_areas || []) {
+      expertiseCounts.set(area, (expertiseCounts.get(area) || 0) + 1);
+    }
+  }
+
+  const toSortedArray = (map, keyName) =>
+    [...map.entries()].sort((a, b) => b[1] - a[1]).map(([key, count]) => ({ [keyName]: key, count }));
+
+  return {
+    total_holders: holders.length,
+    classified_holders: classifiedCount,
+    unclassified_holders: holders.length - classifiedCount,
+    by_industry: toSortedArray(industryCounts, 'industry'),
+    by_seniority: toSortedArray(seniorityCounts, 'seniority_level'),
+    top_expertise_areas: toSortedArray(expertiseCounts, 'expertise_area').slice(0, 20),
+  };
 }
 
 /**

@@ -95,6 +95,35 @@ const passportHolderSchema = new Schema(
       type: Date,
       select: false,
     },
+    // AI-derived talent-pool classification — admin-triggered, not present
+    // until a holder has been classified at least once. See
+    // talentClassifierService.js.
+    talent_classification: {
+      type: new Schema(
+        {
+          primary_industry: { type: String },
+          secondary_industries: { type: [String], default: [] },
+          expertise_areas: { type: [String], default: [] },
+          seniority_level: { type: String },
+          years_of_experience: { type: Number },
+          confidence: { type: Number },
+          summary: { type: String },
+          evidence: {
+            type: [
+              new Schema(
+                { source: String, id: String, note: String },
+                { _id: false }
+              ),
+            ],
+            default: [],
+          },
+          model: { type: String },
+          classified_at: { type: Date },
+        },
+        { _id: false }
+      ),
+      default: undefined,
+    },
   },
   {
     timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },

@@ -10,16 +10,25 @@ import * as educationRepository from '../repositories/educationRepository.js';
 import * as workExperienceRepository from '../repositories/workExperienceRepository.js';
 import * as credentialRepository from '../repositories/credentialRepository.js';
 import * as holderRepository from '../repositories/holderRepository.js';
+import * as talentClassifierService from '../services/talentClassifierService.js';
 import { INDUSTRIES } from '../constants/industries.js';
+import logger from '../utils/logger.js';
 
 const router = Router();
 
 // All admin routes require platform_admin role
 router.use(authenticate, requireRole('platform_admin'));
 
+const MAX_BULK_CLASSIFY = 30;
+
 const updateRoleSchema = Joi.object({
   role: Joi.string().valid('holder', 'org_admin', 'platform_admin').required(),
 });
+
+const bulkClassifySchema = Joi.object({
+  holder_ids: Joi.array().items(Joi.string()).max(MAX_BULK_CLASSIFY),
+  all_unclassified: Joi.boolean(),
+}).or('holder_ids', 'all_unclassified');
 
 const updateHolderSchema = Joi.object({
   full_name: Joi.string().min(2).max(120),
@@ -218,7 +227,9 @@ router.patch(
 
 /**
  * GET /api/admin/holders
- * List/search all holders, paginated.
+ * List/search all holders, paginated. Optionally filtered by AI-derived
+ * talent classification (industry, expertise_area, seniority_level,
+ * classified=true|false).
  */
 router.get(
   '/holders',
@@ -226,6 +237,10 @@ router.get(
     const { page, pageSize, offset } = parsePagination(req.query);
     const { rows, total } = await holderRepository.findAll({
       search: req.query.search,
+      industry: req.query.industry,
+      expertise_area: req.query.expertise_area,
+      seniority_level: req.query.seniority_level,
+      classified: req.query.classified,
       limit: pageSize,
       offset,
     });
@@ -357,6 +372,116 @@ router.delete(
     });
 
     res.status(204).end();
+  })
+);
+
+/**
+ * GET /api/admin/talent-pool
+ * Aggregate breakdown of the talent pool by AI-derived industry, seniority
+ * level, and top expertise tags, for the Talent Pool analytics page.
+ */
+router.get(
+  '/talent-pool',
+  asyncHandler(async (_req, res) => {
+    const stats = await holderRepository.getTalentPoolStats();
+    res.json({ data: stats });
+  })
+);
+
+/**
+ * Runs the classification agent for one holder and persists the result.
+ * Shared by the single and bulk classify routes.
+ */
+async function classifyAndSave(holderId, actorId, req) {
+  const profile = await holderRepository.getFullProfile(holderId);
+  if (!profile) {
+    const err = new Error('Holder not found');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const classification = await talentClassifierService.classifyHolder(profile.holder, {
+    education: profile.education,
+    workExperience: profile.work_experience,
+    credentials: profile.credentials,
+  });
+
+  const updated = await holderRepository.saveTalentClassification(holderId, classification);
+
+  await auditRepository.logAction({
+    id: uuidv4(),
+    actor_id: actorId,
+    actor_type: 'admin',
+    action: 'holder.classified',
+    resource_type: 'holder',
+    resource_id: holderId,
+    metadata: {
+      primary_industry: classification.primary_industry,
+      seniority_level: classification.seniority_level,
+      confidence: classification.confidence,
+    },
+    ip_address: req.ip,
+  });
+
+  return updated;
+}
+
+/**
+ * POST /api/admin/holders/:id/classify
+ * Run the AI talent-classification agent for one holder and persist the
+ * result. Safe to re-run (e.g. after the holder's profile changes) —
+ * overwrites any previous classification.
+ */
+router.post(
+  '/holders/:id/classify',
+  asyncHandler(async (req, res) => {
+    const updated = await classifyAndSave(req.params.id, req.user.id, req);
+    res.json({ data: updated });
+  })
+);
+
+/**
+ * POST /api/admin/holders/classify-bulk
+ * Classify up to MAX_BULK_CLASSIFY holders in one call, either an explicit
+ * holder_ids list or every currently-unclassified holder. Runs sequentially
+ * (the underlying Claude deployment has a per-minute request ceiling) and
+ * keeps going past individual failures so one bad profile doesn't block the
+ * rest of the batch.
+ */
+router.post(
+  '/holders/classify-bulk',
+  validate(bulkClassifySchema),
+  asyncHandler(async (req, res) => {
+    let ids = req.body.holder_ids;
+    if (req.body.all_unclassified) {
+      // Jobseekers only — admin/org accounts aren't part of the talent pool.
+      const { rows } = await holderRepository.findAll({ role: 'holder', classified: false, limit: MAX_BULK_CLASSIFY });
+      ids = rows.map((h) => String(h._id || h.id));
+    }
+    if (!ids?.length) {
+      return res.json({ data: { classified: [], failed: [] } });
+    }
+    if (ids.length > MAX_BULK_CLASSIFY) {
+      return res.status(400).json({
+        error: 'VALIDATION_ERROR',
+        message: `Cannot classify more than ${MAX_BULK_CLASSIFY} holders in one request`,
+        requestId: req.id,
+      });
+    }
+
+    const classified = [];
+    const failed = [];
+    for (const id of ids) {
+      try {
+        const updated = await classifyAndSave(id, req.user.id, req);
+        classified.push({ id, primary_industry: updated.talent_classification?.primary_industry });
+      } catch (err) {
+        logger.warn(`Bulk classify failed for holder ${id}: ${err.message}`);
+        failed.push({ id, error: err.message });
+      }
+    }
+
+    res.json({ data: { classified, failed } });
   })
 );
 
